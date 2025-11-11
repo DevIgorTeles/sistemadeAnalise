@@ -12,7 +12,11 @@ import {
   registrarAuditoria,
   listarMetricasAnalises,
   upsertUser,
-  listarUsuarios
+  listarUsuarios,
+  getAnalisePorData,
+  registrarAuditoriaAnalise,
+  listarAuditorias,
+  getStatusAuditoria
 } from "./db";
 import { TRPCError } from "@trpc/server";
 
@@ -47,6 +51,19 @@ const fraudeSchema = z.object({
   idCliente: z.string().min(1),
   motivoPadrao: z.string().min(1, "Motivo obrigatorio"),
   motivoLivre: z.string().optional(),
+});
+
+const auditoriaSchema = z.object({
+  idCliente: z.string().min(1),
+  motivo: z.string().min(3, "Motivo obrigatorio"),
+  tipo: z.enum(["ESPORTIVO", "CASSINO"]),
+});
+
+const auditoriaFiltroSchema = z.object({
+  tipo: z.enum(["ESPORTIVO", "CASSINO"]).optional(),
+  analistaId: z.number().int().optional(),
+  dataInicio: z.string().optional(),
+  dataFim: z.string().optional(),
 });
 
 export const appRouter = router({
@@ -96,6 +113,21 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const ultima = await getUltimaAnalise(input.idCliente);
         return ultima || null;
+      }),
+
+    verificarHoje: protectedProcedure
+      .input(z.object({
+        idCliente: z.string().min(1),
+        dataAnalise: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const duplicado = await verificarDuplicidade(input.idCliente, input.dataAnalise);
+        if (!duplicado) {
+          return { duplicado: false, analise: null };
+        }
+
+        const analise = await getAnalisePorData(input.idCliente, input.dataAnalise);
+        return { duplicado: true, analise: analise || null };
       }),
 
     criar: protectedProcedure
@@ -157,6 +189,45 @@ export const appRouter = router({
 
         return { success: true, status: "APROVADO" };
       })
+  }),
+
+  auditorias: router({
+    registrar: protectedProcedure
+      .input(auditoriaSchema)
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user?.id) {
+          throw new TRPCError({ code: "UNAUTHORIZED" });
+        }
+
+        await registrarAuditoriaAnalise({
+          idCliente: input.idCliente,
+          motivo: input.motivo,
+          tipo: input.tipo,
+          analistaId: ctx.user.id,
+        });
+
+        await registrarAuditoria("AUDITORIA_REGISTRADA", {
+          idCliente: input.idCliente,
+          motivo: input.motivo,
+          tipo: input.tipo,
+          usuarioId: ctx.user.id,
+        }, ctx.user.id);
+
+        return { success: true };
+      }),
+
+    listar: protectedProcedure
+      .input(auditoriaFiltroSchema.optional())
+      .query(async ({ input }) => {
+        const auditorias = await listarAuditorias(input ?? {});
+        return auditorias;
+      }),
+
+    status: protectedProcedure
+      .input(z.object({ idCliente: z.string().min(1) }))
+      .query(async ({ input }) => {
+        return await getStatusAuditoria(input.idCliente);
+      }),
   }),
 
   // Metricas procedures

@@ -1,6 +1,6 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, clientes, analises, fraudes, logsAuditoria } from "../drizzle/schema";
+import { InsertUser, users, clientes, analises, fraudes, logsAuditoria, auditorias } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import bcrypt from 'bcryptjs';
 
@@ -142,6 +142,23 @@ export async function verificarDuplicidade(idCliente: string, dataAnalise: strin
   return result.length > 0;
 }
 
+export async function getAnalisePorData(idCliente: string, dataAnalise: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(analises)
+    .where(and(
+      eq(analises.idCliente, idCliente),
+      eq(analises.dataAnalise, dataAnalise as any)
+    ))
+    .orderBy(desc(analises.auditoriaData), desc(analises.dataAnalise))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
 export async function criarAnalise(analise: typeof analises.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -183,6 +200,98 @@ export async function listarFraudes(limit: number = 50, offset: number = 0) {
     .offset(offset);
   
   return result;
+}
+
+export async function registrarAuditoriaAnalise(params: {
+  idCliente: string;
+  motivo: string;
+  tipo: "ESPORTIVO" | "CASSINO";
+  analistaId: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(auditorias).values({
+    idCliente: params.idCliente,
+    motivo: params.motivo,
+    tipo: params.tipo,
+    analistaId: params.analistaId,
+  });
+}
+
+export async function listarAuditorias(filtros: {
+  tipo?: "ESPORTIVO" | "CASSINO";
+  analistaId?: number;
+  dataInicio?: string;
+  dataFim?: string;
+} = {}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions: any[] = [];
+
+  if (filtros.tipo) {
+    conditions.push(eq(auditorias.tipo, filtros.tipo));
+  }
+  if (filtros.analistaId) {
+    conditions.push(eq(auditorias.analistaId, filtros.analistaId));
+  }
+  if (filtros.dataInicio) {
+    conditions.push(gte(auditorias.criadoEm, new Date(filtros.dataInicio)));
+  }
+  if (filtros.dataFim) {
+    const fim = new Date(filtros.dataFim);
+    fim.setHours(23, 59, 59, 999);
+    conditions.push(lte(auditorias.criadoEm, fim));
+  }
+
+  let query = db
+    .select({
+      id: auditorias.id,
+      idCliente: auditorias.idCliente,
+      motivo: auditorias.motivo,
+      tipo: auditorias.tipo,
+      criadoEm: auditorias.criadoEm,
+      analistaId: auditorias.analistaId,
+      nomeCliente: clientes.nomeCompleto,
+      nomeAnalista: users.name,
+    })
+    .from(auditorias)
+    .leftJoin(clientes, eq(auditorias.idCliente, clientes.idCliente))
+    .leftJoin(users, eq(auditorias.analistaId, users.id));
+
+  if (conditions.length > 0) {
+    query = query.where(and(...conditions));
+  }
+
+  return await query.orderBy(desc(auditorias.criadoEm));
+}
+
+export async function getStatusAuditoria(idCliente: string) {
+  const db = await getDb();
+  if (!db) return { temAuditoria: false, ultima: null };
+
+  const resultado = await db
+    .select({
+      id: auditorias.id,
+      motivo: auditorias.motivo,
+      tipo: auditorias.tipo,
+      criadoEm: auditorias.criadoEm,
+      analistaId: auditorias.analistaId,
+      nomeAnalista: users.name,
+    })
+    .from(auditorias)
+    .leftJoin(users, eq(auditorias.analistaId, users.id))
+    .where(eq(auditorias.idCliente, idCliente))
+    .orderBy(desc(auditorias.criadoEm))
+    .limit(1);
+
+  const ultima = resultado.length > 0 ? resultado[0] : null;
+
+  return {
+    temAuditoria: Boolean(ultima),
+    ultima,
+  };
 }
 
 export async function registrarAuditoria(tipo: string, detalhe: Record<string, any>, usuarioId?: number) {

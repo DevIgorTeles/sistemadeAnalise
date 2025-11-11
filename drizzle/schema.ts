@@ -94,6 +94,21 @@ export type Fraude = typeof fraudes.$inferSelect;
 export type InsertFraude = typeof fraudes.$inferInsert;
 
 /**
+ * Auditorias table: stores audit flags associated with analyses
+ */
+export const auditorias = mysqlTable("auditorias", {
+  id: int("id").autoincrement().primaryKey(),
+  idCliente: varchar("id_cliente", { length: 64 }).notNull(),
+  motivo: text("motivo").notNull(),
+  tipo: mysqlEnum("tipo", ["ESPORTIVO", "CASSINO"]).notNull(),
+  analistaId: int("analista_id").notNull(),
+  criadoEm: timestamp("criado_em").defaultNow().notNull(),
+});
+
+export type Auditoria = typeof auditorias.$inferSelect;
+export type InsertAuditoria = typeof auditorias.$inferInsert;
+
+/**
  * Logs de auditoria: immutable audit trail
  */
 export const logsAuditoria = mysqlTable("logs_auditoria", {
@@ -116,6 +131,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const clientesRelations = relations(clientes, ({ many }) => ({
   analises: many(analises),
   fraudes: many(fraudes),
+  auditorias: many(auditorias),
 }));
 
 export const analisesRelations = relations(analises, ({ one }) => ({
@@ -136,6 +152,17 @@ export const fraudesRelations = relations(fraudes, ({ one }) => ({
   }),
   analista: one(users, {
     fields: [fraudes.analistaId],
+    references: [users.id],
+  }),
+}));
+
+export const auditoriasRelations = relations(auditorias, ({ one }) => ({
+  cliente: one(clientes, {
+    fields: [auditorias.idCliente],
+    references: [clientes.idCliente],
+  }),
+  analista: one(users, {
+    fields: [auditorias.analistaId],
     references: [users.id],
   }),
 }));

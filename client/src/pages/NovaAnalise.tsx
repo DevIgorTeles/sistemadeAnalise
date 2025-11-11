@@ -1,11 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertCircle, Loader2, ArrowLeft, Play, Pause, RotateCcw, Clock } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { AlertCircle, Loader2, ArrowLeft, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
@@ -31,7 +42,7 @@ const METRICAS_SAQUE = [
 const CATEGORIAS = ["CASSINO", "SPORTBOOK", "N/A"];
 
 export default function NovaAnalise() {
-  const { user } = useAuth();
+  useAuth();
   const [, navigate] = useLocation();
   
   const [tipoAnalise, setTipoAnalise] = useState<TipoAnalise>("SAQUE");
@@ -57,6 +68,21 @@ export default function NovaAnalise() {
   const [observacao, setObservacao] = useState("");
   const [isDuplicado, setIsDuplicado] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [auditoriaMarcada, setAuditoriaMarcada] = useState(false);
+  const [auditoriaModalAberto, setAuditoriaModalAberto] = useState(false);
+  const [auditoriaTipo, setAuditoriaTipo] = useState<"ESPORTIVO" | "CASSINO" | "">("");
+  const [auditoriaMotivo, setAuditoriaMotivo] = useState("");
+  const [auditoriaErro, setAuditoriaErro] = useState("");
+
+  const { data: verificacaoHoje } = trpc.analises.verificarHoje.useQuery(
+    { idCliente, dataAnalise },
+    { enabled: idCliente.length > 0 && dataAnalise.length > 0 }
+  );
+  const { data: auditoriaStatus } = trpc.auditorias.status.useQuery(
+    { idCliente },
+    { enabled: idCliente.length > 0 }
+  );
+  const alertaDuplicadoRef = useRef<string | null>(null);
 
   // Cronômetro automático (inicia ao inserir ID)
   const [tempoSegundos, setTempoSegundos] = useState(0);
@@ -68,8 +94,43 @@ export default function NovaAnalise() {
     { enabled: idCliente.length > 0 }
   );
 
+  const analiseDoDia = verificacaoHoje?.analise ?? null;
+  const dataAnaliseBloqueada = analiseDoDia
+    ? (analiseDoDia.auditoriaData ?? analiseDoDia.dataAnalise ?? null)
+    : null;
+  const dataAnaliseBloqueadaFormatada = dataAnaliseBloqueada
+    ? new Date(dataAnaliseBloqueada as string | number | Date).toLocaleString()
+    : "";
+  const clienteAuditorado = auditoriaStatus?.temAuditoria ?? false;
+  const ultimaAuditoria = auditoriaStatus?.ultima ?? null;
+  const camposDesabilitados = !idCliente || isDuplicado;
+
+  useEffect(() => {
+    if (!idCliente) {
+      setIsDuplicado(false);
+      alertaDuplicadoRef.current = null;
+      return;
+    }
+
+    if (verificacaoHoje?.duplicado) {
+      setIsDuplicado(true);
+      setCronometroAtivo(false);
+      if (alertaDuplicadoRef.current !== `${idCliente}-${dataAnalise}`) {
+        toast.error("Cliente já foi analisado nesta data.");
+        alertaDuplicadoRef.current = `${idCliente}-${dataAnalise}`;
+      }
+    } else {
+      setIsDuplicado(false);
+      alertaDuplicadoRef.current = null;
+    }
+  }, [verificacaoHoje, idCliente, dataAnalise]);
+
   // Auto-preencher com última análise
   useEffect(() => {
+    if (isDuplicado) {
+      return;
+    }
+
     if (ultimaAnalise) {
       setNomeCompleto(ultimaAnalise.nomeCompleto || "");
       setDataCriacaoConta(ultimaAnalise.dataCriacaoConta?.toString().split("T")[0] || "");
@@ -88,18 +149,53 @@ export default function NovaAnalise() {
       }
       
       setObservacao(ultimaAnalise.observacao || "");
+    } else if (ultimaAnalise === null) {
+      setNomeCompleto("");
+      setDataCriacaoConta("");
+      setHorarioSaque("");
+      setValorSaque("");
+      setMetricaSaque("");
+      setCategoriaSaque("");
+      setJogoEsporteSaque("");
+      setValorDeposito("");
+      setCategoriaDeposito("");
+      setJogoEsporteDepositoApos("");
+      setFinanceiro("");
+      setObservacao("");
     }
-  }, [ultimaAnalise]);
+  }, [ultimaAnalise, isDuplicado]);
+
+  useEffect(() => {
+    if (idCliente.length === 0) {
+      setNomeCompleto("");
+      setDataCriacaoConta("");
+      setHorarioSaque("");
+      setValorSaque("");
+      setMetricaSaque("");
+      setCategoriaSaque("");
+      setJogoEsporteSaque("");
+      setValorDeposito("");
+      setCategoriaDeposito("");
+      setJogoEsporteDepositoApos("");
+      setFinanceiro("");
+      setObservacao("");
+      setTipoAnalise("SAQUE");
+      setAuditoriaMarcada(false);
+      setAuditoriaTipo("");
+      setAuditoriaMotivo("");
+      setAuditoriaErro("");
+    }
+  }, [idCliente]);
 
   // Iniciar cronômetro ao inserir ID do cliente
   useEffect(() => {
-    if (idCliente.length > 0) {
+    if (idCliente.length > 0 && !isDuplicado) {
       setCronometroAtivo(true);
       setTempoSegundos(0);
     } else {
       setCronometroAtivo(false);
     }
-  }, [idCliente]);
+  }, [idCliente, isDuplicado]);
 
   // Cronômetro automático que inicia ao inserir ID
   useEffect(() => {
@@ -125,10 +221,6 @@ export default function NovaAnalise() {
 
   // Criar análise
   const criarMutation = trpc.analises.criar.useMutation({
-    onSuccess: () => {
-      toast.success("Análise criada com sucesso");
-      navigate("/");
-    },
     onError: (error) => {
       if (error.message.includes("duplicado")) {
         setIsDuplicado(true);
@@ -150,10 +242,34 @@ export default function NovaAnalise() {
     },
   });
 
+  const registrarAuditoriaMutation = trpc.auditorias.registrar.useMutation({
+    onError: () => {
+      toast.error("Erro ao registrar auditoria");
+    },
+  });
+
   const handleFinalizar = async () => {
     if (!idCliente || !dataAnalise) {
       toast.error("Preencha ID do cliente e data");
       return;
+    }
+
+    if (isDuplicado) {
+      toast.error("Cliente já analisado nesta data. Ajuste a data para continuar.");
+      return;
+    }
+
+    if (auditoriaMarcada) {
+      if (!auditoriaTipo) {
+        setAuditoriaErro("Selecione o tipo da auditoria");
+        toast.error("Selecione o tipo da auditoria");
+        return;
+      }
+      if (!auditoriaMotivo.trim()) {
+        setAuditoriaErro("Informe o motivo da auditoria");
+        toast.error("Informe o motivo da auditoria");
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -181,6 +297,14 @@ export default function NovaAnalise() {
       setCronometroAtivo(false);
       setTempoSegundos(0);
 
+      if (auditoriaMarcada) {
+        await registrarAuditoriaMutation.mutateAsync({
+          idCliente,
+          motivo: auditoriaMotivo.trim(),
+          tipo: auditoriaTipo as "ESPORTIVO" | "CASSINO",
+        });
+      }
+
       await finalizarMutation.mutateAsync({
         idCliente,
         dataAnalise,
@@ -192,6 +316,43 @@ export default function NovaAnalise() {
 
   const handleReportarFraude = () => {
     toast.info("Modal de fraude em desenvolvimento");
+  };
+
+  const abrirModalAuditoria = () => {
+    setAuditoriaErro("");
+    setAuditoriaModalAberto(true);
+  };
+
+  const handleToggleAuditoria = (checked: boolean | "indeterminate") => {
+    if (checked === true) {
+      abrirModalAuditoria();
+    } else {
+      handleCancelarAuditoria();
+    }
+  };
+
+  const handleConfirmarAuditoria = () => {
+    if (!auditoriaTipo) {
+      setAuditoriaErro("Selecione o tipo da auditoria");
+      return;
+    }
+    if (!auditoriaMotivo.trim()) {
+      setAuditoriaErro("Informe o motivo da auditoria");
+      return;
+    }
+
+    setAuditoriaMarcada(true);
+    setAuditoriaErro("");
+    setAuditoriaModalAberto(false);
+    toast.success("Auditoria marcada para esta análise");
+  };
+
+  const handleCancelarAuditoria = () => {
+    setAuditoriaMarcada(false);
+    setAuditoriaTipo("");
+    setAuditoriaMotivo("");
+    setAuditoriaErro("");
+    setAuditoriaModalAberto(false);
   };
 
   return (
@@ -219,13 +380,18 @@ export default function NovaAnalise() {
                 <p className="text-sm text-destructive/80">
                   Cliente já foi analisado hoje. Registro duplicado bloqueado.
                 </p>
+                {dataAnaliseBloqueadaFormatada && (
+                  <p className="text-xs text-destructive/60 mt-1">
+                    Última análise registrada em {dataAnaliseBloqueadaFormatada}
+                  </p>
+                )}
               </div>
             </div>
           </Card>
         )}
 
         {/* Card do Cronômetro Automático */}
-        {idCliente && (
+        {idCliente && !isDuplicado && (
           <Card className="glass-card p-6 mb-6 bg-gradient-to-r from-primary/10 via-secondary/10 to-accent/10 border-primary/30 animate-fade-in">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -260,7 +426,8 @@ export default function NovaAnalise() {
                     tipoAnalise === "SAQUE"
                       ? "border-primary bg-gradient-to-br from-primary/20 to-primary/10 shadow-lg shadow-primary/10"
                       : "border-border/50 bg-background/30 hover:border-primary/50 hover:bg-background/50"
-                  }`}
+                  } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  disabled={camposDesabilitados}
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div>
@@ -289,7 +456,8 @@ export default function NovaAnalise() {
                     tipoAnalise === "DEPOSITO"
                       ? "border-primary bg-gradient-to-br from-primary/20 to-primary/10 shadow-lg shadow-primary/10"
                       : "border-border/50 bg-background/30 hover:border-primary/50 hover:bg-background/50"
-                  }`}
+                  } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  disabled={camposDesabilitados}
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div>
@@ -320,16 +488,29 @@ export default function NovaAnalise() {
               
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <Label htmlFor="idCliente" className="text-foreground">
-                    ID do Cliente *
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="idCliente" className="text-foreground">
+                      ID do Cliente *
+                    </Label>
+                    {isDuplicado && (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-destructive">
+                        <AlertCircle size={14} />
+                        Já analisado hoje
+                      </span>
+                    )}
+                    {(clienteAuditorado || auditoriaMarcada) && !isDuplicado && (
+                      <Badge variant="outline" className="border-amber-500 text-amber-200 bg-amber-500/10 flex items-center gap-1 text-[11px] font-medium">
+                        <span className="text-lg leading-none">⚠️</span>
+                        Auditorado
+                      </Badge>
+                    )}
+                  </div>
                   <Input
                     id="idCliente"
                     value={idCliente}
                     onChange={(e) => setIdCliente(e.target.value)}
                     placeholder="Digite o ID"
                     className="mt-2 bg-input border-border text-foreground"
-                    disabled={false}
                   />
                 </div>
                 <div>
@@ -342,7 +523,7 @@ export default function NovaAnalise() {
                     onChange={(e) => setNomeCompleto(e.target.value)}
                     placeholder="Nome completo do cliente"
                     className="mt-2 bg-input border-border text-foreground"
-                    disabled={!idCliente}
+                    disabled={camposDesabilitados}
                   />
                 </div>
               </div>
@@ -358,7 +539,7 @@ export default function NovaAnalise() {
                     value={dataCriacaoConta}
                     onChange={(e) => setDataCriacaoConta(e.target.value)}
                     className="mt-2 bg-input border-border text-foreground"
-                    disabled={!idCliente}
+                    disabled={camposDesabilitados}
                   />
                 </div>
                 <div>
@@ -375,6 +556,7 @@ export default function NovaAnalise() {
                   />
                 </div>
               </div>
+
             </div>
 
             {/* Campos Específicos - SAQUE */}
@@ -393,7 +575,7 @@ export default function NovaAnalise() {
                       value={horarioSaque}
                       onChange={(e) => setHorarioSaque(e.target.value)}
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                    disabled={camposDesabilitados}
                     />
                   </div>
                   <div>
@@ -408,7 +590,7 @@ export default function NovaAnalise() {
                       onChange={(e) => setValorSaque(e.target.value)}
                       placeholder="0.00"
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                    disabled={camposDesabilitados}
                     />
                   </div>
                 </div>
@@ -422,7 +604,7 @@ export default function NovaAnalise() {
                     value={metricaSaque}
                     onChange={(e) => setMetricaSaque(e.target.value)}
                     className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
-                    disabled={!idCliente}
+                    disabled={camposDesabilitados}
                   >
                     <option value="">Selecione uma métrica...</option>
                     {METRICAS_SAQUE.map((m) => (
@@ -443,7 +625,7 @@ export default function NovaAnalise() {
                       value={categoriaSaque}
                       onChange={(e) => setCategoriaSaque(e.target.value)}
                       className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
-                      disabled={!idCliente}
+                    disabled={camposDesabilitados}
                     >
                       <option value="">Selecione...</option>
                       {CATEGORIAS.map((c) => (
@@ -463,7 +645,7 @@ export default function NovaAnalise() {
                       onChange={(e) => setJogoEsporteSaque(e.target.value)}
                       placeholder="Ex: Futebol, Slots"
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                    disabled={camposDesabilitados}
                     />
                   </div>
                   <div>
@@ -478,7 +660,7 @@ export default function NovaAnalise() {
                       onChange={(e) => setFinanceiro(e.target.value)}
                       placeholder="Positivo: casa ganha | Negativo: cliente lucra"
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                    disabled={camposDesabilitados}
                     />
                   </div>
                 </div>
@@ -502,7 +684,7 @@ export default function NovaAnalise() {
                     onChange={(e) => setValorDeposito(e.target.value)}
                     placeholder="0.00"
                     className="mt-2 bg-input border-border text-foreground"
-                    disabled={!idCliente}
+                    disabled={camposDesabilitados}
                   />
                 </div>
 
@@ -516,7 +698,7 @@ export default function NovaAnalise() {
                       value={categoriaDeposito}
                       onChange={(e) => setCategoriaDeposito(e.target.value)}
                       className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
-                      disabled={!idCliente}
+                      disabled={camposDesabilitados}
                     >
                       <option value="">Selecione...</option>
                       {CATEGORIAS.map((c) => (
@@ -536,7 +718,7 @@ export default function NovaAnalise() {
                       onChange={(e) => setJogoEsporteDepositoApos(e.target.value)}
                       placeholder="N/A se não realizou apostas"
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                      disabled={camposDesabilitados}
                     />
                   </div>
                   <div>
@@ -551,7 +733,7 @@ export default function NovaAnalise() {
                       onChange={(e) => setFinanceiro(e.target.value)}
                       placeholder="Positivo: casa ganha | Negativo: cliente lucra"
                       className="mt-2 bg-input border-border text-foreground"
-                      disabled={!idCliente}
+                      disabled={camposDesabilitados}
                     />
                   </div>
                 </div>
@@ -570,10 +752,80 @@ export default function NovaAnalise() {
                 placeholder="Notas adicionais..."
                 className="mt-2 bg-input border-border text-foreground"
                 rows={4}
-                disabled={!idCliente}
+                disabled={camposDesabilitados}
               />
               <div className="text-xs text-muted-foreground mt-1">
                 {observacao.length}/1000
+              </div>
+            </div>
+
+            {/* Auditoria */}
+            <div className="border-t border-border pt-6">
+              <div className="space-y-3 border border-border/50 rounded-lg p-4 bg-background/40">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="auditoriaFlag"
+                      checked={auditoriaMarcada}
+                      onCheckedChange={handleToggleAuditoria}
+                      disabled={camposDesabilitados}
+                    />
+                    <div>
+                      <Label htmlFor="auditoriaFlag" className="text-foreground font-medium cursor-pointer">
+                        Auditoria?
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Defina motivo e tipo de auditoria antes de finalizar a análise.
+                      </p>
+                    </div>
+                  </div>
+                  {auditoriaMarcada && (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={abrirModalAuditoria}>
+                        Editar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={handleCancelarAuditoria}
+                      >
+                        Remover
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {auditoriaMarcada && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-amber-200 flex items-center gap-2">
+                        ⚠️ Auditoria marcada nesta análise
+                      </span>
+                      <span className="text-xs uppercase tracking-wide text-amber-300">{auditoriaTipo}</span>
+                    </div>
+                    <p className="text-foreground/90 whitespace-pre-line">{auditoriaMotivo}</p>
+                  </div>
+                )}
+
+                {!auditoriaMarcada && ultimaAuditoria && (
+                  <div className="rounded-md border border-primary/30 bg-primary/5 p-4 text-sm space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-primary flex items-center gap-2">
+                        ⚠️ Auditoria existente para este cliente
+                      </span>
+                      <span className="text-xs uppercase tracking-wide text-primary">{ultimaAuditoria.tipo}</span>
+                    </div>
+                    <p className="text-foreground/90">{ultimaAuditoria.motivo}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Registrada em{" "}
+                      {ultimaAuditoria.criadoEm
+                        ? new Date(ultimaAuditoria.criadoEm as string | number | Date).toLocaleString("pt-BR")
+                        : "-"}{" "}
+                      por {ultimaAuditoria.nomeAnalista ?? "—"}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -613,6 +865,90 @@ export default function NovaAnalise() {
           </div>
         </Card>
       </div>
+
+      <Dialog open={auditoriaModalAberto} onOpenChange={(open) => setAuditoriaModalAberto(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar auditoria</DialogTitle>
+            <DialogDescription>
+              Informe o motivo e selecione o tipo de auditoria para este cliente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium text-foreground">
+                Tipo da auditoria *
+              </Label>
+              <RadioGroup
+                value={auditoriaTipo || undefined}
+                onValueChange={(value: "ESPORTIVO" | "CASSINO") => {
+                  setAuditoriaErro("");
+                  setAuditoriaTipo(value);
+                }}
+                className="mt-3 grid grid-cols-2 gap-3"
+              >
+                <label
+                  htmlFor="auditoria-esportivo"
+                  className="border border-border rounded-lg px-4 py-3 flex items-center gap-2 cursor-pointer data-[state=checked]:border-primary data-[state=checked]:bg-primary/10 transition-colors"
+                >
+                  <RadioGroupItem value="ESPORTIVO" id="auditoria-esportivo" />
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Esportivo</span>
+                    <p className="text-xs text-muted-foreground">Eventos e apostas esportivas</p>
+                  </div>
+                </label>
+                <label
+                  htmlFor="auditoria-cassino"
+                  className="border border-border rounded-lg px-4 py-3 flex items-center gap-2 cursor-pointer data-[state=checked]:border-primary data-[state=checked]:bg-primary/10 transition-colors"
+                >
+                  <RadioGroupItem value="CASSINO" id="auditoria-cassino" />
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Cassino</span>
+                    <p className="text-xs text-muted-foreground">Jogos de cassino e slots</p>
+                  </div>
+                </label>
+              </RadioGroup>
+            </div>
+
+            <div>
+              <Label htmlFor="auditoriaMotivo" className="text-sm font-medium text-foreground">
+                Motivo da auditoria *
+              </Label>
+              <Textarea
+                id="auditoriaMotivo"
+                value={auditoriaMotivo}
+                onChange={(e) => {
+                  setAuditoriaErro("");
+                  setAuditoriaMotivo(e.target.value.slice(0, 500));
+                }}
+                placeholder="Descreva de forma objetiva o motivo pelo qual esta análise exige auditoria."
+                className="mt-2"
+                rows={4}
+              />
+              <div className="mt-1 text-xs text-muted-foreground">
+                {auditoriaMotivo.length}/500 caracteres
+              </div>
+            </div>
+
+            {auditoriaErro && (
+              <div className="text-sm text-destructive flex items-center gap-2">
+                <AlertCircle size={16} className="text-destructive" />
+                {auditoriaErro}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAuditoriaModalAberto(false)}>
+              Fechar
+            </Button>
+            <Button onClick={handleConfirmarAuditoria} className="btn-primary">
+              Confirmar auditoria
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Link } from "wouter";
-import { Loader2, Plus, AlertCircle, BarChart3 } from "lucide-react";
+import { Loader2, Plus, AlertCircle, BarChart3, ShieldAlert } from "lucide-react";
 import { APP_LOGO, APP_TITLE, getLoginUrl } from "@/const";
 
 export default function Home() {
@@ -89,6 +89,16 @@ export default function Home() {
               <h3 className="text-lg font-semibold text-foreground mb-2">Fraudes</h3>
               <p className="text-sm text-muted-foreground">
                 Visualize casos de fraude reportados
+              </p>
+            </Card>
+          </Link>
+
+          <Link href="/auditorias">
+            <Card className="glass-card p-6 hover:border-primary/50 transition-colors cursor-pointer h-full">
+              <ShieldAlert className="text-amber-400 mb-4" size={32} />
+              <h3 className="text-lg font-semibold text-foreground mb-2">Auditorias</h3>
+              <p className="text-sm text-muted-foreground">
+                Consulte análises marcadas para auditoria e revise motivos registrados
               </p>
             </Card>
           </Link>

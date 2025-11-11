@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import NovaAnalise from "./pages/NovaAnalise";
 import Fraudes from "./pages/Fraudes";
+import Auditorias from "./pages/Auditorias";
 import ImportarCSV from "./pages/ImportarCSV";
 import GestaoUsuarios from "./pages/GestaoUsuarios";
 import Relatorios from "./pages/Relatorios";
@@ -20,6 +21,7 @@ function Router() {
   <Route path="/login" component={Login} />
       <Route path="/analise/nova" component={NovaAnalise} />
       <Route path="/fraudes" component={Fraudes} />
+      <Route path="/auditorias" component={Auditorias} />
       <Route path="/admin/importar-csv" component={ImportarCSV} />
       <Route path="/admin/usuarios" component={GestaoUsuarios} />
       <Route path="/admin/relatorios" component={Relatorios} />
