@@ -91,11 +91,18 @@ O sistema precisa de algumas informações guardadas em um arquivo chamado `.env
 Este comando cria as tabelas certinhas dentro do banco.
 
 ### Dados de demonstração (opcionais)
-Quer começar com algumas informações? Use os arquivos:
-- `dados_ficticios_teste.sql`
-- `insert_test_users.sql`
-- `EXECUTAR_DADOS_TESTE.md`  
-Eles explicam como popular o banco com exemplos.
+Quer começar com informações prontas? Com o MySQL conectado ao banco `opa_system`, rode:
+```sql
+SOURCE /home/pablo/Documentos/OPA/sistemadeAnalise/insert_test_users.sql;
+SOURCE /home/pablo/Documentos/OPA/sistemadeAnalise/dados_ficticios_teste.sql;
+```
+O primeiro script cria usuários de teste; o segundo popula clientes, análises, fraudes e logs.
+Se preferir rodar via terminal, utilize:
+```bash
+mysql -u root -p opa_system < /home/pablo/Documentos/OPA/sistemadeAnalise/insert_test_users.sql
+mysql -u root -p opa_system < /home/pablo/Documentos/OPA/sistemadeAnalise/dados_ficticios_teste.sql
+```
+Troque `root`/`-p` conforme suas credenciais.
 
 ---
 

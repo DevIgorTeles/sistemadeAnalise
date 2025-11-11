@@ -249,8 +249,28 @@ export default function NovaAnalise() {
   });
 
   const handleFinalizar = async () => {
-    if (!idCliente || !dataAnalise) {
-      toast.error("Preencha ID do cliente e data");
+    const idClienteTrimmed = idCliente.trim();
+    const nomeTrimmed = nomeCompleto.trim();
+    const observacaoTrimmed = observacao.trim();
+    const financeiroTrimmed = financeiro.trim();
+
+    if (!idClienteTrimmed || !dataAnalise) {
+      toast.error("Preencha ID do cliente e data válidos");
+      return;
+    }
+
+    if (!nomeTrimmed) {
+      toast.error("Informe o nome do cliente");
+      return;
+    }
+
+    if (!observacaoTrimmed) {
+      toast.error("Descreva a observação da análise");
+      return;
+    }
+
+    if (!financeiroTrimmed) {
+      toast.error("Informe o financeiro da análise");
       return;
     }
 
@@ -272,24 +292,95 @@ export default function NovaAnalise() {
       }
     }
 
+    const financeiroNumber = parseFloat(financeiroTrimmed);
+    if (Number.isNaN(financeiroNumber)) {
+      toast.error("Financeiro inválido");
+      return;
+    }
+
+    if (tipoAnalise === "SAQUE") {
+      const horarioTrimmed = horarioSaque.trim();
+      const metricaTrimmed = metricaSaque.trim();
+      const categoriaTrimmed = categoriaSaque.trim();
+      const jogoTrimmed = jogoEsporteSaque.trim();
+      const valorSaqueNumber = valorSaque ? parseFloat(valorSaque) : NaN;
+
+      if (!horarioTrimmed) {
+        toast.error("Informe o horário do saque");
+        return;
+      }
+
+      if (!valorSaque || Number.isNaN(valorSaqueNumber) || valorSaqueNumber <= 0) {
+        toast.error("Informe o valor do saque (maior que 0)");
+        return;
+      }
+
+      if (!metricaTrimmed) {
+        toast.error("Selecione a métrica do saque");
+        return;
+      }
+
+      if (!categoriaTrimmed) {
+        toast.error("Selecione a categoria do saque");
+        return;
+      }
+
+      if (!jogoTrimmed) {
+        toast.error("Informe o jogo ou esporte do saque");
+        return;
+      }
+    } else {
+      const categoriaDepositoTrimmed = categoriaDeposito.trim();
+      const jogoDepositoTrimmed = jogoEsporteDepositoApos.trim();
+      const valorDepositoNumber = valorDeposito ? parseFloat(valorDeposito) : NaN;
+
+      if (!valorDeposito || Number.isNaN(valorDepositoNumber) || valorDepositoNumber <= 0) {
+        toast.error("Informe o valor do depósito (maior que 0)");
+        return;
+      }
+
+      if (!categoriaDepositoTrimmed) {
+        toast.error("Selecione a categoria do depósito");
+        return;
+      }
+
+      if (!jogoDepositoTrimmed) {
+        toast.error("Informe o jogo ou esporte após o depósito");
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       await criarMutation.mutateAsync({
-        idCliente,
+        idCliente: idClienteTrimmed,
         dataAnalise,
-        nomeCompleto,
+        nomeCompleto: nomeTrimmed,
         dataCriacaoConta: dataCriacaoConta ? new Date(dataCriacaoConta) : undefined,
         tipoAnalise,
-        horarioSaque: tipoAnalise === "SAQUE" ? horarioSaque : undefined,
-        valorSaque: tipoAnalise === "SAQUE" && valorSaque ? parseFloat(valorSaque) : undefined,
-        metricaSaque: tipoAnalise === "SAQUE" ? metricaSaque : undefined,
-        categoriaSaque: tipoAnalise === "SAQUE" ? categoriaSaque : undefined,
-        jogoEsporteSaque: tipoAnalise === "SAQUE" ? jogoEsporteSaque : undefined,
-        valorDeposito: tipoAnalise === "DEPOSITO" && valorDeposito ? parseFloat(valorDeposito) : undefined,
-        categoriaDeposito: tipoAnalise === "DEPOSITO" ? categoriaDeposito : undefined,
-        jogoEsporteDepositoApos: tipoAnalise === "DEPOSITO" ? jogoEsporteDepositoApos : undefined,
-        financeiro: financeiro ? parseFloat(financeiro) : undefined,
-        observacao,
+        horarioSaque: tipoAnalise === "SAQUE" ? horarioSaque.trim() : undefined,
+        valorSaque:
+          tipoAnalise === "SAQUE" && valorSaque
+            ? parseFloat(valorSaque)
+            : undefined,
+        metricaSaque:
+          tipoAnalise === "SAQUE" ? metricaSaque.trim() : undefined,
+        categoriaSaque:
+          tipoAnalise === "SAQUE" ? categoriaSaque.trim() : undefined,
+        jogoEsporteSaque:
+          tipoAnalise === "SAQUE" ? jogoEsporteSaque.trim() : undefined,
+        valorDeposito:
+          tipoAnalise === "DEPOSITO" && valorDeposito
+            ? parseFloat(valorDeposito)
+            : undefined,
+        categoriaDeposito:
+          tipoAnalise === "DEPOSITO" ? categoriaDeposito.trim() : undefined,
+        jogoEsporteDepositoApos:
+          tipoAnalise === "DEPOSITO"
+            ? jogoEsporteDepositoApos.trim()
+            : undefined,
+        financeiro: financeiroNumber,
+        observacao: observacaoTrimmed,
         tempoAnaliseSegundos: tempoSegundos,
       });
       

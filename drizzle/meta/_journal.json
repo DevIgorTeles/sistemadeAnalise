@@ -43,6 +43,13 @@
       "when": 1761678576082,
       "tag": "0005_fearless_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1762877562274,
+      "tag": "0006_nappy_brood",
+      "breakpoints": true
     }
   ]
 }

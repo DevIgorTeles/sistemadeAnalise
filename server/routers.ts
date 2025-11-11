@@ -3,10 +3,10 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
-import { 
-  getUltimaAnalise, 
-  verificarDuplicidade, 
-  criarAnalise, 
+import {
+  getUltimaAnalise,
+  verificarDuplicidade,
+  criarAnalise,
   reportarFraude,
   listarFraudes,
   registrarAuditoria,
@@ -20,32 +20,91 @@ import {
 } from "./db";
 import { TRPCError } from "@trpc/server";
 
-// Schemas for validation
-const analisesSchema = z.object({
-  idCliente: z.string().min(1, "ID do cliente obrigatorio"),
-  nomeCompleto: z.string().optional(),
-  dataAnalise: z.string().refine((date) => {
-    const d = new Date(date);
-    return d <= new Date() && !isNaN(d.getTime());
-  }, "Data invalida ou futura"),
-  dataCriacaoConta: z.date().optional(),
-  tipoAnalise: z.enum(["SAQUE", "DEPOSITO"]).optional(),
-  horarioSaque: z.string().optional(),
-  valorSaque: z.number().optional(),
-  metricaSaque: z.string().optional(),
-  categoriaSaque: z.string().optional(),
-  jogoEsporteSaque: z.string().optional(),
-  valorDeposito: z.number().optional(),
-  ganhoPerda: z.number().optional(),
-  financeiro: z.number().optional(),
-  categoriaDeposito: z.string().optional(),
-  jogoEsporteDepositoApos: z.string().optional(),
-  tempoAnaliseSegundos: z.number().optional(),
-  qtdApostas: z.number().optional(),
+const ensureValidDate = (value: string | Date, ctx: z.RefinementCtx) => {
+  const parsedDate = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Data inválida",
+    });
+    return;
+  }
+
+  if (parsedDate > new Date()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Data futura não permitida",
+    });
+  }
+};
+
+const dateField = z.union([
+  z.string().trim().min(1, "Data obrigatória"),
+  z.date(),
+]).superRefine(ensureValidDate);
+
+const optionalDateField = dateField.optional().nullable();
+
+const toDate = (value?: string | Date | null) => {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const analiseBaseSchema = z.object({
+  idCliente: z.string().trim().min(1, "ID do cliente obrigatório"),
+  nomeCompleto: z.string().trim().min(2, "Nome do cliente obrigatório"),
+  dataAnalise: dateField,
+  dataCriacaoConta: optionalDateField,
+  tempoAnaliseSegundos: z.number().int().min(0).optional(),
+  observacao: z.string().trim().min(3, "Observação obrigatória").max(1000),
+  fonteConsulta: z.string().trim().min(1).optional(),
+  qtdApostas: z.number().int().min(0).optional(),
   retornoApostas: z.number().optional(),
-  observacao: z.string().max(1000).optional(),
-  fonteConsulta: z.string().optional(),
+  ganhoPerda: z.number().optional(),
 });
+
+// Schemas for validation
+const analisesSchema = z.discriminatedUnion("tipoAnalise", [
+  analiseBaseSchema.extend({
+    tipoAnalise: z.literal("SAQUE"),
+    horarioSaque: z.string().trim().min(1, "Horário do saque obrigatório"),
+    valorSaque: z
+      .number()
+      .gt(0, "Valor do saque deve ser maior que zero"),
+    metricaSaque: z.string().trim().min(1, "Métrica do saque obrigatória"),
+    categoriaSaque: z.string().trim().min(1, "Categoria do saque obrigatória"),
+    jogoEsporteSaque: z.string().trim().min(1, "Informe o jogo ou esporte"),
+    financeiro: z.number(),
+    valorDeposito: z.undefined().optional(),
+    categoriaDeposito: z.undefined().optional(),
+    jogoEsporteDepositoApos: z.undefined().optional(),
+  }),
+  analiseBaseSchema.extend({
+    tipoAnalise: z.literal("DEPOSITO"),
+    valorDeposito: z
+      .number()
+      .gt(0, "Valor do depósito deve ser maior que zero"),
+    categoriaDeposito: z
+      .string()
+      .trim()
+      .min(1, "Categoria do depósito obrigatória"),
+    jogoEsporteDepositoApos: z
+      .string()
+      .trim()
+      .min(1, "Informe o jogo ou esporte após o depósito"),
+    financeiro: z.number(),
+    valorSaque: z.undefined().optional(),
+    horarioSaque: z.undefined().optional(),
+    metricaSaque: z.undefined().optional(),
+    categoriaSaque: z.undefined().optional(),
+    jogoEsporteSaque: z.undefined().optional(),
+  }),
+]);
 
 const fraudeSchema = z.object({
   idCliente: z.string().min(1),
@@ -134,7 +193,20 @@ export const appRouter = router({
       .input(analisesSchema)
       .mutation(async ({ input, ctx }) => {
         // Check for duplicity
-        const isDuplicado = await verificarDuplicidade(input.idCliente, input.dataAnalise);
+        const normalizedIdCliente = input.idCliente.trim();
+        const dataAnaliseDate = toDate(input.dataAnalise);
+        if (!dataAnaliseDate) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Data da análise inválida",
+          });
+        }
+        const dataAnaliseStr = dataAnaliseDate.toISOString().slice(0, 10);
+
+        const isDuplicado = await verificarDuplicidade(
+          normalizedIdCliente,
+          dataAnaliseStr
+        );
         if (isDuplicado) {
           throw new TRPCError({
             code: "CONFLICT",
@@ -142,36 +214,73 @@ export const appRouter = router({
           });
         }
 
+        const dataCriacaoContaDate = toDate(input.dataCriacaoConta);
+        const observacao = input.observacao.trim();
+        const fonteConsulta = input.fonteConsulta?.trim();
+
         // Create analysis
         const analise = {
-          idCliente: input.idCliente,
-          nomeCompleto: input.nomeCompleto,
-          dataAnalise: new Date(input.dataAnalise),
-          dataCriacaoConta: input.dataCriacaoConta,
+          idCliente: normalizedIdCliente,
+          nomeCompleto: input.nomeCompleto.trim(),
+          dataAnalise: dataAnaliseDate,
+          dataCriacaoConta: dataCriacaoContaDate,
           tipoAnalise: input.tipoAnalise,
-          horarioSaque: input.horarioSaque,
-          valorSaque: input.valorSaque?.toString(),
-          metricaSaque: input.metricaSaque,
-          categoriaSaque: input.categoriaSaque,
-          jogoEsporteSaque: input.jogoEsporteSaque,
-          valorDeposito: input.valorDeposito?.toString(),
-          ganhoPerda: input.ganhoPerda?.toString(),
-          financeiro: input.financeiro?.toString(),
-          categoriaDeposito: input.categoriaDeposito,
-          jogoEsporteDepositoApos: input.jogoEsporteDepositoApos,
+          horarioSaque:
+            input.tipoAnalise === "SAQUE"
+              ? input.horarioSaque.trim()
+              : undefined,
+          valorSaque:
+            input.tipoAnalise === "SAQUE"
+              ? input.valorSaque.toString()
+              : undefined,
+          metricaSaque:
+            input.tipoAnalise === "SAQUE"
+              ? input.metricaSaque.trim()
+              : undefined,
+          categoriaSaque:
+            input.tipoAnalise === "SAQUE"
+              ? input.categoriaSaque.trim()
+              : undefined,
+          jogoEsporteSaque:
+            input.tipoAnalise === "SAQUE"
+              ? input.jogoEsporteSaque.trim()
+              : undefined,
+          valorDeposito:
+            input.valorDeposito !== undefined
+              ? input.valorDeposito.toString()
+              : undefined,
+          ganhoPerda:
+            input.ganhoPerda !== undefined
+              ? input.ganhoPerda.toString()
+              : undefined,
+          financeiro:
+            input.financeiro !== undefined
+              ? input.financeiro.toString()
+              : undefined,
+          categoriaDeposito:
+            input.tipoAnalise === "DEPOSITO"
+              ? input.categoriaDeposito.trim()
+              : undefined,
+          jogoEsporteDepositoApos:
+            input.tipoAnalise === "DEPOSITO"
+              ? input.jogoEsporteDepositoApos.trim()
+              : undefined,
           tempoAnaliseSegundos: input.tempoAnaliseSegundos,
           qtdApostas: input.qtdApostas,
-          retornoApostas: input.retornoApostas?.toString(),
-          observacao: input.observacao,
-          fonteConsulta: input.fonteConsulta,
+          retornoApostas:
+            input.retornoApostas !== undefined
+              ? input.retornoApostas.toString()
+              : undefined,
+          observacao,
+          fonteConsulta: fonteConsulta && fonteConsulta.length > 0 ? fonteConsulta : undefined,
           auditoriaUsuario: ctx.user.id,
           auditoriaData: new Date(),
         };
 
         await criarAnalise(analise);
         await registrarAuditoria("ANALISE_CRIADA", {
-          idCliente: input.idCliente,
-          dataAnalise: input.dataAnalise,
+          idCliente: normalizedIdCliente,
+          dataAnalise: dataAnaliseStr,
           usuarioId: ctx.user.id,
         }, ctx.user.id);
 
