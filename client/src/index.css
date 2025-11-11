@@ -1,0 +1,345 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --primary: #6ea8ff;
+  --primary-foreground: #0b0f14;
+  --sidebar-primary: #6ea8ff;
+  --sidebar-primary-foreground: #0b0f14;
+  --chart-1: #6ea8ff;
+  --chart-2: #8a7dff;
+  --chart-3: #4fd1c5;
+  --chart-4: #29d398;
+  --chart-5: #ffcf5c;
+  --radius: 0.65rem;
+  --background: #0b0f14;
+  --foreground: #e7eefc;
+  --card: rgba(15, 23, 36, 0.4);
+  --card-foreground: #e7eefc;
+  --popover: rgba(15, 23, 36, 0.4);
+  --popover-foreground: #e7eefc;
+  --secondary: #8a7dff;
+  --secondary-foreground: #0b0f14;
+  --muted: #9fb0c7;
+  --muted-foreground: #9fb0c7;
+  --accent: #6ea8ff;
+  --accent-foreground: #0b0f14;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #0b0f14;
+  --border: rgba(38, 63, 116, 0.3);
+  --input: rgba(15, 26, 44, 0.4);
+  --ring: #6ea8ff;
+  --sidebar: rgba(15, 23, 36, 0.4);
+  --sidebar-foreground: #e7eefc;
+  --sidebar-accent: #6ea8ff;
+  --sidebar-accent-foreground: #0b0f14;
+  --sidebar-border: rgba(38, 63, 116, 0.3);
+  --sidebar-ring: #6ea8ff;
+}
+
+.dark {
+  --primary: #6ea8ff;
+  --primary-foreground: #0b0f14;
+  --sidebar-primary: #6ea8ff;
+  --sidebar-primary-foreground: #0b0f14;
+  --background: #0b0f14;
+  --foreground: #e7eefc;
+  --card: rgba(15, 23, 36, 0.4);
+  --card-foreground: #e7eefc;
+  --popover: rgba(15, 23, 36, 0.4);
+  --popover-foreground: #e7eefc;
+  --secondary: #8a7dff;
+  --secondary-foreground: #0b0f14;
+  --muted: #9fb0c7;
+  --muted-foreground: #9fb0c7;
+  --accent: #6ea8ff;
+  --accent-foreground: #0b0f14;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #0b0f14;
+  --border: rgba(38, 63, 116, 0.3);
+  --input: rgba(15, 26, 44, 0.4);
+  --ring: #6ea8ff;
+  --chart-1: #6ea8ff;
+  --chart-2: #8a7dff;
+  --chart-3: #4fd1c5;
+  --chart-4: #29d398;
+  --chart-5: #ffcf5c;
+  --sidebar: rgba(15, 23, 36, 0.4);
+  --sidebar-foreground: #e7eefc;
+  --sidebar-accent: #6ea8ff;
+  --sidebar-accent-foreground: #0b0f14;
+  --sidebar-border: rgba(38, 63, 116, 0.3);
+  --sidebar-ring: #6ea8ff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+@layer components {
+  /**
+   * Custom container utility that centers content and adds responsive padding.
+   *
+   * This overrides Tailwind's default container behavior to:
+   * - Auto-center content (mx-auto)
+   * - Add responsive horizontal padding
+   * - Set max-width for large screens
+   *
+   * Usage: <div className="container">...</div>
+   *
+   * For custom widths, use max-w-* utilities directly:
+   * <div className="max-w-6xl mx-auto px-4">...</div>
+   */
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem; /* 16px - mobile padding */
+    padding-right: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem; /* 24px - tablet padding */
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem; /* 32px - desktop padding */
+      padding-right: 2rem;
+      max-width: 1280px; /* Standard content width */
+    }
+  }
+}
+
+@layer utilities {
+  /* Glassmorphism effect for sidebar - more transparent */
+  [data-sidebar="sidebar"] {
+    background: rgba(15, 23, 36, 0.5) !important;
+    border-right: 1px solid rgba(38, 63, 116, 0.2);
+  }
+
+  /* Enhanced glass cards with glow effect - more transparent */
+  .glass-card {
+    background: rgba(15, 23, 36, 0.4);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s ease;
+  }
+
+  .glass-card:hover {
+    background: rgba(15, 23, 36, 0.5);
+    border-color: rgba(110, 168, 255, 0.3);
+    box-shadow: 0 8px 32px rgba(110, 168, 255, 0.15);
+  }
+
+  .glass-blur {
+    background: rgba(11, 15, 20, 0.6);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* Text gradient */
+  .text-gradient {
+    background: linear-gradient(135deg, #6ea8ff 0%, #8a7dff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Enhanced button */
+  .btn-primary {
+    background: linear-gradient(135deg, #6ea8ff 0%, #8a7dff 100%);
+    color: #0b0f14;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    border: none;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(110, 168, 255, 0.3);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Enhanced inputs - more transparent */
+  .input,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  input[type="time"],
+  textarea,
+  select {
+    background: rgba(15, 26, 44, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--foreground);
+    transition: all 0.3s ease;
+  }
+
+  .input:focus,
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: #6ea8ff;
+    box-shadow: 0 0 0 3px rgba(110, 168, 255, 0.1);
+    background: rgba(15, 26, 44, 0.5) !important;
+  }
+
+  .input:hover,
+  input:hover,
+  textarea:hover,
+  select:hover {
+    border-color: rgba(110, 168, 255, 0.3);
+    background: rgba(15, 26, 44, 0.4) !important;
+  }
+
+  /* Smooth animations */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.4s ease-out;
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.4s ease-out;
+  }
+
+  /* Enhanced cards - more transparent */
+  .card-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(15, 23, 36, 0.35) !important;
+    backdrop-filter: blur(12px);
+  }
+
+  .card-hover:hover {
+    transform: translateY(-4px);
+    background: rgba(15, 23, 36, 0.45) !important;
+    box-shadow: 0 12px 40px rgba(110, 168, 255, 0.15);
+  }
+
+  /* Make all default cards transparent */
+  [class*="card"] {
+    background: rgba(15, 23, 36, 0.35) !important;
+    backdrop-filter: blur(12px);
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  /* Subtle shimmer effect */
+  @keyframes shimmer {
+    0% {
+      background-position: -1000px 0;
+    }
+    100% {
+      background-position: 1000px 0;
+    }
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.15) 50%,
+      rgba(255, 255, 255, 0.05) 100%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 3s infinite;
+  }
+
+  /* Improved focus states */
+  *:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}

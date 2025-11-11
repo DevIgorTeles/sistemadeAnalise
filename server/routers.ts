@@ -1,0 +1,210 @@
+import { COOKIE_NAME } from "@shared/const";
+import { getSessionCookieOptions } from "./_core/cookies";
+import { systemRouter } from "./_core/systemRouter";
+import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
+import { z } from "zod";
+import { 
+  getUltimaAnalise, 
+  verificarDuplicidade, 
+  criarAnalise, 
+  reportarFraude,
+  listarFraudes,
+  registrarAuditoria,
+  listarMetricasAnalises,
+  upsertUser,
+  listarUsuarios
+} from "./db";
+import { TRPCError } from "@trpc/server";
+
+// Schemas for validation
+const analisesSchema = z.object({
+  idCliente: z.string().min(1, "ID do cliente obrigatorio"),
+  nomeCompleto: z.string().optional(),
+  dataAnalise: z.string().refine((date) => {
+    const d = new Date(date);
+    return d <= new Date() && !isNaN(d.getTime());
+  }, "Data invalida ou futura"),
+  dataCriacaoConta: z.date().optional(),
+  tipoAnalise: z.enum(["SAQUE", "DEPOSITO"]).optional(),
+  horarioSaque: z.string().optional(),
+  valorSaque: z.number().optional(),
+  metricaSaque: z.string().optional(),
+  categoriaSaque: z.string().optional(),
+  jogoEsporteSaque: z.string().optional(),
+  valorDeposito: z.number().optional(),
+  ganhoPerda: z.number().optional(),
+  financeiro: z.number().optional(),
+  categoriaDeposito: z.string().optional(),
+  jogoEsporteDepositoApos: z.string().optional(),
+  tempoAnaliseSegundos: z.number().optional(),
+  qtdApostas: z.number().optional(),
+  retornoApostas: z.number().optional(),
+  observacao: z.string().max(1000).optional(),
+  fonteConsulta: z.string().optional(),
+});
+
+const fraudeSchema = z.object({
+  idCliente: z.string().min(1),
+  motivoPadrao: z.string().min(1, "Motivo obrigatorio"),
+  motivoLivre: z.string().optional(),
+});
+
+export const appRouter = router({
+  system: systemRouter,
+
+  auth: router({
+    me: publicProcedure.query(opts => opts.ctx.user),
+    logout: publicProcedure.mutation(({ ctx }) => {
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return {
+        success: true,
+      } as const;
+    }),
+  }),
+
+  // Usuários - administração
+  usuarios: router({
+    listar: protectedProcedure
+      .query(async () => {
+        const usuarios = await listarUsuarios();
+        return usuarios;
+      }),
+    
+    criar: protectedProcedure
+      .input(z.object({ email: z.string().email(), nome: z.string().min(1), role: z.enum(["analista","admin"]).default("analista"), password: z.string().min(6) }))
+      .mutation(async ({ input }) => {
+        // Use email as openId for local users created via admin UI
+        const openId = input.email;
+        await upsertUser({
+          password: input.password,
+          openId,
+          name: input.nome,
+          email: input.email,
+          loginMethod: 'local',
+          role: input.role,
+          lastSignedIn: new Date(),
+        });
+        return { success: true };
+      }),
+  }),
+
+  // Analises procedures
+  analises: router({
+    getUltimo: protectedProcedure
+      .input(z.object({ idCliente: z.string() }))
+      .query(async ({ input }) => {
+        const ultima = await getUltimaAnalise(input.idCliente);
+        return ultima || null;
+      }),
+
+    criar: protectedProcedure
+      .input(analisesSchema)
+      .mutation(async ({ input, ctx }) => {
+        // Check for duplicity
+        const isDuplicado = await verificarDuplicidade(input.idCliente, input.dataAnalise);
+        if (isDuplicado) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Cliente ja analisado hoje. Registro duplicado bloqueado.",
+          });
+        }
+
+        // Create analysis
+        const analise = {
+          idCliente: input.idCliente,
+          nomeCompleto: input.nomeCompleto,
+          dataAnalise: new Date(input.dataAnalise),
+          dataCriacaoConta: input.dataCriacaoConta,
+          tipoAnalise: input.tipoAnalise,
+          horarioSaque: input.horarioSaque,
+          valorSaque: input.valorSaque?.toString(),
+          metricaSaque: input.metricaSaque,
+          categoriaSaque: input.categoriaSaque,
+          jogoEsporteSaque: input.jogoEsporteSaque,
+          valorDeposito: input.valorDeposito?.toString(),
+          ganhoPerda: input.ganhoPerda?.toString(),
+          financeiro: input.financeiro?.toString(),
+          categoriaDeposito: input.categoriaDeposito,
+          jogoEsporteDepositoApos: input.jogoEsporteDepositoApos,
+          tempoAnaliseSegundos: input.tempoAnaliseSegundos,
+          qtdApostas: input.qtdApostas,
+          retornoApostas: input.retornoApostas?.toString(),
+          observacao: input.observacao,
+          fonteConsulta: input.fonteConsulta,
+          auditoriaUsuario: ctx.user.id,
+          auditoriaData: new Date(),
+        };
+
+        await criarAnalise(analise);
+        await registrarAuditoria("ANALISE_CRIADA", {
+          idCliente: input.idCliente,
+          dataAnalise: input.dataAnalise,
+          usuarioId: ctx.user.id,
+        }, ctx.user.id);
+
+        return { success: true };
+      }),
+
+    finalizar: protectedProcedure
+      .input(z.object({ idCliente: z.string(), dataAnalise: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        await registrarAuditoria("ANALISE_FINALIZADA", {
+          idCliente: input.idCliente,
+          dataAnalise: input.dataAnalise,
+          usuarioId: ctx.user.id,
+        }, ctx.user.id);
+
+        return { success: true, status: "APROVADO" };
+      })
+  }),
+
+  // Metricas procedures
+  metricas: router({
+    getAnalises: protectedProcedure
+      .input(z.object({
+        analista_id: z.number().optional(),
+        data_inicio: z.date().optional(),
+        data_fim: z.date().optional(),
+        tipo_analise: z.enum(["SAQUE", "DEPOSITO"]).optional(),
+      }))
+      .query(async ({ input }) => {
+        return await listarMetricasAnalises(input);
+      }),
+  }),
+
+  // Fraudes procedures
+  fraudes: router({
+    reportar: protectedProcedure
+      .input(fraudeSchema)
+      .mutation(async ({ input, ctx }) => {
+        const fraude = {
+          ...input,
+          analistaId: ctx.user.id,
+          dataRegistro: new Date(),
+        };
+
+        await reportarFraude(fraude);
+        await registrarAuditoria("FRAUDE_REPORTADA", {
+          idCliente: input.idCliente,
+          motivo: input.motivoPadrao,
+          usuarioId: ctx.user.id,
+        }, ctx.user.id);
+
+        return { success: true };
+      }),
+
+    listar: protectedProcedure
+      .input(z.object({ 
+        limit: z.number().default(50),
+        offset: z.number().default(0),
+      }))
+      .query(async ({ input }) => {
+        const fraudes = await listarFraudes(input.limit, input.offset);
+        return fraudes;
+      }),
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+

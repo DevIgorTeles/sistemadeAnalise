@@ -1,0 +1,1 @@
+ALTER TABLE `analises` ADD `financeiro` decimal(18,2);

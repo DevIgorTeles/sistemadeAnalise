@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1761500047235,
+      "tag": "0000_moaning_randall_flagg",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1761500097371,
+      "tag": "0001_concerned_adam_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1761501702906,
+      "tag": "0002_tidy_eddie_brock",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1761531513906,
+      "tag": "0003_wet_blockbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1761578609325,
+      "tag": "0004_even_namora",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1761678576082,
+      "tag": "0005_fearless_loners",
+      "breakpoints": true
+    }
+  ]
+}
