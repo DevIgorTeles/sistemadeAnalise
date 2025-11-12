@@ -9,14 +9,25 @@ import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 
 export default function Fraudes() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  const { data: fraudes, isLoading } = trpc.fraudes.listar.useQuery({
-    limit,
-    offset,
-  });
+  const { data: fraudes, isLoading } = trpc.fraudes.listar.useQuery(
+    { limit, offset },
+    { enabled: Boolean(user) }
+  );
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">

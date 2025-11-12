@@ -6,11 +6,15 @@ import { useCallback, useEffect, useMemo } from "react";
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
   redirectPath?: string;
+  preserveNext?: boolean;
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
-    options ?? {};
+  const {
+    redirectOnUnauthenticated = false,
+    redirectPath = getLoginUrl(),
+    preserveNext = true,
+  } = options ?? {};
   const utils = trpc.useUtils();
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
@@ -42,10 +46,16 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, utils]);
 
   const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
+    if (typeof window !== "undefined") {
+      if (meQuery.data) {
+        localStorage.setItem(
+          "manus-runtime-user-info",
+          JSON.stringify(meQuery.data)
+        );
+      } else {
+        localStorage.removeItem("manus-runtime-user-info");
+      }
+    }
     return {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
@@ -65,12 +75,23 @@ export function useAuth(options?: UseAuthOptions) {
     if (meQuery.isLoading || logoutMutation.isPending) return;
     if (state.user) return;
     if (typeof window === "undefined") return;
-    if (window.location.pathname === redirectPath) return;
+    const redirectUrl = new URL(
+      redirectPath,
+      window.location.origin
+    );
 
-    window.location.href = redirectPath
+    if (preserveNext && !redirectUrl.searchParams.has("next")) {
+      const nextValue = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      redirectUrl.searchParams.set("next", nextValue);
+    }
+
+    if (redirectUrl.pathname === window.location.pathname) return;
+
+    window.location.href = redirectUrl.toString();
   }, [
     redirectOnUnauthenticated,
     redirectPath,
+    preserveNext,
     logoutMutation.isPending,
     meQuery.isLoading,
     state.user,

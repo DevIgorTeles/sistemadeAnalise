@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function Login() {
   const [, navigate] = useLocation();
@@ -9,6 +10,16 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (!auth.loading && auth.user) {
+      const params = new URLSearchParams(window.location.search);
+      const candidate = params.get("next") || params.get("redirect");
+      const candidateSafe = candidate && candidate.startsWith("/") ? candidate : null;
+      navigate(candidateSafe ?? "/", { replace: true });
+    }
+  }, [auth.loading, auth.user, navigate]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +78,14 @@ export default function Login() {
     }
   };
 
-  return (
+  return auth.loading ? (
+    <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center px-4">
+      <div className="flex items-center gap-3 text-muted-foreground text-sm">
+        <span className="h-3 w-3 rounded-full bg-primary animate-pulse" />
+        Verificando sessão...
+      </div>
+    </div>
+  ) : (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center px-4">
       <div className="max-w-md w-full glass-card p-8 animate-fade-in">
         <div className="text-center mb-8">

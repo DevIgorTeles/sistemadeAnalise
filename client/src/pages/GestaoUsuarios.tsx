@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, Plus, Loader2, Shield, User, Users } from "lucide-react";
-import { Link } from "wouter";
+import { Plus, Loader2, Shield, User, Users } from "lucide-react";
+import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 export default function GestaoUsuarios() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
+  const [, navigate] = useLocation();
   const [novoEmail, setNovoEmail] = useState("");
   const [novoNome, setNovoNome] = useState("");
   const [novoRole, setNovoRole] = useState<"analista" | "admin">("analista");
@@ -18,25 +22,24 @@ export default function GestaoUsuarios() {
   const [isLoading, setIsLoading] = useState(false);
   
   const criarUsuarioMutation = trpc.usuarios.criar.useMutation();
-  const { data: usuarios = [], isLoading: carregandoUsuarios, refetch } = trpc.usuarios.listar.useQuery();
+  const {
+    data: usuarios = [],
+    isLoading: carregandoUsuarios,
+    refetch,
+  } = trpc.usuarios.listar.useQuery(undefined, {
+    enabled: Boolean(user && user.role === "admin"),
+  });
 
-  if (user?.role !== "admin") {
+  useEffect(() => {
+    if (!loading && user && user.role !== "admin") {
+      navigate("/", { replace: true });
+    }
+  }, [loading, user, navigate]);
+
+  if (loading || !user || user.role !== "admin") {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">
-        <div className="container">
-          <Card className="glass-card p-8 text-center">
-            <AlertCircle className="mx-auto text-destructive mb-4" size={40} />
-            <h3 className="text-lg font-semibold text-foreground mb-2">
-              Acesso Negado
-            </h3>
-            <p className="text-muted-foreground mb-6">
-              Apenas administradores podem gerenciar usuários
-            </p>
-            <Link href="/">
-              <Button className="btn-primary">Voltar ao Dashboard</Button>
-            </Link>
-          </Card>
-        </div>
+      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
       </div>
     );
   }

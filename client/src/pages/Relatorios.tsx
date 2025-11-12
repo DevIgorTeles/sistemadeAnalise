@@ -3,15 +3,23 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Users, Clock, DollarSign } from "lucide-react";
+import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Users, Clock, DollarSign, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
 
 export default function Relatorios() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
   const [, navigate] = useLocation();
+  useEffect(() => {
+    if (!loading && user && user.role !== "admin") {
+      navigate("/", { replace: true });
+    }
+  }, [loading, user, navigate]);
   
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
@@ -30,13 +38,26 @@ export default function Relatorios() {
     tempoMedioPorUsuario: {} as Record<string, number>,
   });
 
+  if (loading || !user || user.role !== "admin") {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
+
   // Fetch métricas
-  const { data: analises, isLoading } = trpc.metricas.getAnalises.useQuery({
-    analista_id: user?.role === "admin" ? undefined : user?.id,
-    data_inicio: dataInicio ? new Date(dataInicio) : undefined,
-    data_fim: dataFim ? new Date(dataFim) : undefined,
-    tipo_analise: tipoAnalise || undefined,
-  });
+  const { data: analises, isLoading } = trpc.metricas.getAnalises.useQuery(
+    {
+      analista_id: user?.role === "admin" ? undefined : user?.id,
+      data_inicio: dataInicio ? new Date(dataInicio) : undefined,
+      data_fim: dataFim ? new Date(dataFim) : undefined,
+      tipo_analise: tipoAnalise || undefined,
+    },
+    {
+      enabled: Boolean(user && user.role === "admin"),
+    }
+  );
 
   // Processar dados para gráficos
   useEffect(() => {
@@ -523,6 +544,12 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                       analise.tipoAnalise === "SAQUE"
                         ? analise.categoriaSaque
                         : analise.categoriaDeposito;
+                    const tipo =
+                      analise.tipoAnalise === "SAQUE"
+                        ? "SAQUE"
+                        : analise.tipoAnalise === "DEPOSITO"
+                        ? "DEPOSITO"
+                        : null;
 
                     return (
                       <tr key={analise.id} className="border-b border-border/50 hover:bg-background/50">
@@ -533,9 +560,9 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                         </td>
                         <td className="py-3 px-4">
                           <span
-                            className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getTipoBadgeClass(analise.tipoAnalise)}`}
+                            className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getTipoBadgeClass(tipo)}`}
                           >
-                            {analise.tipoAnalise}
+                            {tipo ?? analise.tipoAnalise ?? "—"}
                           </span>
                         </td>
                         <td className="py-3 px-4">

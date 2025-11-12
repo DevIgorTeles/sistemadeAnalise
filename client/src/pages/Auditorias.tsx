@@ -1,3 +1,4 @@
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +8,21 @@ import { AlertCircle, Loader2, ShieldAlert, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Auditorias() {
-  const { data: auditorias, isLoading } = trpc.auditorias.listar.useQuery(undefined);
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
+  const { data: auditorias, isLoading } = trpc.auditorias.listar.useQuery(undefined, {
+    enabled: Boolean(user),
+  });
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">

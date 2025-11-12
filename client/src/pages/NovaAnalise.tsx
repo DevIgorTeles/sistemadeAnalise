@@ -42,8 +42,19 @@ const METRICAS_SAQUE = [
 const CATEGORIAS = ["CASSINO", "SPORTBOOK", "N/A"];
 
 export default function NovaAnalise() {
-  useAuth();
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: true,
+    redirectPath: "/login",
+  });
   const [, navigate] = useLocation();
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
   
   const [tipoAnalise, setTipoAnalise] = useState<TipoAnalise>("SAQUE");
   const [idCliente, setIdCliente] = useState("");
