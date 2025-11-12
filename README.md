@@ -93,16 +93,16 @@ Este comando cria as tabelas certinhas dentro do banco.
 ### Dados de demonstração (opcionais)
 Quer começar com informações prontas? Com o MySQL conectado ao banco `opa_system`, rode:
 ```sql
-SOURCE /home/pablo/Documentos/OPA/sistemadeAnalise/insert_test_users.sql;
-SOURCE /home/pablo/Documentos/OPA/sistemadeAnalise/dados_ficticios_teste.sql;
+SOURCE /caminho/para/sua/pasta/sistemadeAnalise/insert_test_users.sql;
+SOURCE /caminho/para/sua/pasta/sistemadeAnalise/dados_ficticios_teste.sql;
 ```
 O primeiro script cria usuários de teste; o segundo popula clientes, análises, fraudes e logs.
 Se preferir rodar via terminal, utilize:
 ```bash
-mysql -u root -p opa_system < /home/pablo/Documentos/OPA/sistemadeAnalise/insert_test_users.sql
-mysql -u root -p opa_system < /home/pablo/Documentos/OPA/sistemadeAnalise/dados_ficticios_teste.sql
+mysql -u root -p opa_system < /caminho/para/sua/pasta/sistemadeAnalise/insert_test_users.sql
+mysql -u root -p opa_system < /caminho/para/sua/pasta/sistemadeAnalise/dados_ficticios_teste.sql
 ```
-Troque `root`/`-p` conforme suas credenciais.
+Troque `root`/`-p` pelas credenciais corretas e substitua `/caminho/para/sua/pasta/` pelo diretório onde o projeto foi clonado (por exemplo, `/home/seu-usuario/Documentos` no Linux ou `C:\Users\SeuUsuario\Documentos` no Windows).
 
 ---
 
