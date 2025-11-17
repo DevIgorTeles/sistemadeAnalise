@@ -26,6 +26,7 @@ export default function Relatorios() {
   const [tipoAnalise, setTipoAnalise] = useState<"SAQUE" | "DEPOSITO" | "">("");
   const [analisesVisiveis, setAnalisesVisiveis] = useState(10);
   const [usuariosVisiveis, setUsuariosVisiveis] = useState(10);
+  const [tempoMedioUsuariosVisiveis, setTempoMedioUsuariosVisiveis] = useState(9);
   
   const [metricas, setMetricas] = useState({
     totalAnalises: 0,
@@ -126,6 +127,19 @@ export default function Relatorios() {
   }, [usuariosOrdenados, usuariosVisiveis]);
 
   const podeVerMaisUsuarios = usuariosOrdenados.length > usuariosVisiveis;
+
+  // Tempo Médio por Usuário - ordenar e limitar
+  const tempoMedioUsuariosOrdenados = useMemo(() => {
+    return Object.entries(metricas.tempoMedioPorUsuario).sort(
+      (a, b) => b[1] - a[1]
+    );
+  }, [metricas.tempoMedioPorUsuario]);
+
+  const tempoMedioUsuariosLimitados = useMemo(() => {
+    return tempoMedioUsuariosOrdenados.slice(0, tempoMedioUsuariosVisiveis);
+  }, [tempoMedioUsuariosOrdenados, tempoMedioUsuariosVisiveis]);
+
+  const podeVerMaisTempoMedio = tempoMedioUsuariosOrdenados.length > tempoMedioUsuariosVisiveis;
 
   const handleExportarCSV = () => {
     if (!analises || analises.length === 0) {
@@ -499,9 +513,9 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
         {/* Tempo Médio por Usuário */}
         <Card className="glass-card p-6 mb-8">
           <h3 className="text-lg font-semibold text-foreground mb-4">Tempo Médio por Usuário</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Object.entries(metricas.tempoMedioPorUsuario).length > 0 ? (
-              Object.entries(metricas.tempoMedioPorUsuario).map(([usuario, tempo]) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            {tempoMedioUsuariosLimitados.length > 0 ? (
+              tempoMedioUsuariosLimitados.map(([usuario, tempo]) => (
                 <div key={usuario} className="p-4 border border-border/50 rounded-lg hover:border-accent/50 transition-colors">
                   <p className="text-sm text-muted-foreground mb-2 truncate">{usuario}</p>
                   <p className="text-2xl font-bold text-accent">{formatarTempo(tempo)}</p>
@@ -509,6 +523,30 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
               ))
             ) : (
               <p className="text-muted-foreground">Nenhum dado</p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {podeVerMaisTempoMedio && (
+              <Button
+                variant="outline"
+                className="border-primary/30 text-primary hover:bg-primary/10"
+                onClick={() =>
+                  setTempoMedioUsuariosVisiveis((prev) =>
+                    Math.min(prev + 9, tempoMedioUsuariosOrdenados.length)
+                  )
+                }
+              >
+                Ver mais usuários
+              </Button>
+            )}
+            {tempoMedioUsuariosVisiveis > 9 && (
+              <Button
+                variant="ghost"
+                className="text-muted-foreground hover:text-primary hover:bg-primary/10"
+                onClick={() => setTempoMedioUsuariosVisiveis(9)}
+              >
+                Ver menos
+              </Button>
             )}
           </div>
         </Card>

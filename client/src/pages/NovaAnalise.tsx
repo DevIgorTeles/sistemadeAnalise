@@ -233,11 +233,13 @@ export default function NovaAnalise() {
   // Criar análise
   const criarMutation = trpc.analises.criar.useMutation({
     onError: (error) => {
-      if (error.message.includes("duplicado")) {
+      if (error.message.includes("duplicado") || error.message.includes("ja analisado")) {
         setIsDuplicado(true);
-        toast.error("Cliente já analisado hoje");
+        toast.error("⚠️ Este ID já foi analisado hoje. Não é possível criar uma nova análise para o mesmo cliente no mesmo dia.", {
+          duration: 5000,
+        });
       } else {
-        toast.error("Erro ao criar análise");
+        toast.error("Erro ao criar análise: " + error.message);
       }
     },
   });
@@ -286,7 +288,9 @@ export default function NovaAnalise() {
     }
 
     if (isDuplicado) {
-      toast.error("Cliente já analisado nesta data. Ajuste a data para continuar.");
+      toast.error("⚠️ Este ID já foi analisado hoje. Não é possível finalizar uma análise duplicada.", {
+        duration: 5000,
+      });
       return;
     }
 
@@ -474,18 +478,33 @@ export default function NovaAnalise() {
         </div>
 
         {isDuplicado && (
-          <Card className="glass-card p-4 mb-6 border-destructive/50 bg-destructive/10">
-            <div className="flex gap-3">
-              <AlertCircle className="text-destructive flex-shrink-0" size={20} />
-              <div>
-                <h3 className="font-semibold text-destructive">Análise Duplicada</h3>
-                <p className="text-sm text-destructive/80">
-                  Cliente já foi analisado hoje. Registro duplicado bloqueado.
+          <Card className="glass-card p-5 mb-6 border-destructive/50 bg-destructive/10 animate-fade-in">
+            <div className="flex gap-4">
+              <div className="flex-shrink-0">
+                <div className="p-2 rounded-lg bg-destructive/20">
+                  <AlertCircle className="text-destructive" size={24} />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-destructive text-lg mb-2">⚠️ Este ID já foi analisado hoje</h3>
+                <p className="text-sm text-destructive/90 mb-2">
+                  O cliente <strong className="font-semibold">{idCliente}</strong> já possui uma análise registrada para a data <strong className="font-semibold">{new Date(dataAnalise).toLocaleDateString('pt-BR')}</strong>.
+                </p>
+                <p className="text-sm text-destructive/80 mb-2">
+                  Não é possível criar uma nova análise para o mesmo cliente no mesmo dia.
                 </p>
                 {dataAnaliseBloqueadaFormatada && (
-                  <p className="text-xs text-destructive/60 mt-1">
-                    Última análise registrada em {dataAnaliseBloqueadaFormatada}
-                  </p>
+                  <div className="mt-3 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+                    <p className="text-xs text-destructive/70 font-medium mb-1">Informações da análise existente:</p>
+                    <p className="text-xs text-destructive/60">
+                      Registrada em: <span className="font-semibold">{dataAnaliseBloqueadaFormatada}</span>
+                    </p>
+                    {analiseDoDia?.nomeCompleto && (
+                      <p className="text-xs text-destructive/60 mt-1">
+                        Cliente: <span className="font-semibold">{analiseDoDia.nomeCompleto}</span>
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
