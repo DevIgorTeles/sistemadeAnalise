@@ -108,7 +108,7 @@ export default function GestaoUsuarios() {
                   id="novoNome"
                   value={novoNome}
                   onChange={(e) => setNovoNome(e.target.value)}
-                  placeholder="João Silva"
+                  placeholder="Nome"
                   className="px-4 py-3"
                   disabled={isLoading}
                 />

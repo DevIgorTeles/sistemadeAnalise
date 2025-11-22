@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { Link } from "wouter";
+import { LoadingState } from "@/components/common/LoadingState";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageHeader } from "@/components/common/PageHeader";
+import { formatarData } from "@/utils/formatters";
 
 export default function Fraudes() {
   const { user, loading } = useAuth({
@@ -22,30 +22,21 @@ export default function Fraudes() {
   );
 
   if (loading || !user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">
       <div className="container">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gradient">Fraudes Reportadas</h1>
-            <p className="text-muted-foreground mt-1">Acompanhe todos os casos de fraude</p>
-          </div>
-          <Link href="/">
-            <Button variant="outline">← Voltar</Button>
-          </Link>
-        </div>
+        <PageHeader
+          title="Fraudes Reportadas"
+          description="Visualize todos os casos de fraude reportados pela equipe"
+          icon={AlertCircle}
+          backUrl="/"
+        />
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-primary" size={40} />
-          </div>
+          <LoadingState className="min-h-[400px]" size={40} />
         ) : fraudes && fraudes.length > 0 ? (
           <div className="space-y-4">
             {fraudes.map((fraude) => (
@@ -66,7 +57,7 @@ export default function Fraudes() {
                       <div>
                         <span className="text-muted-foreground">Data:</span>
                         <p className="text-foreground font-medium">
-                          {new Date(fraude.dataRegistro).toLocaleDateString("pt-BR")}
+                          {formatarData(fraude.dataRegistro)}
                         </p>
                       </div>
                     </div>
@@ -82,15 +73,10 @@ export default function Fraudes() {
             ))}
           </div>
         ) : (
-          <Card className="glass-card p-12 text-center">
-            <AlertCircle className="mx-auto text-muted-foreground mb-4" size={40} />
-            <h3 className="text-lg font-semibold text-foreground mb-2">
-              Nenhuma fraude reportada
-            </h3>
-            <p className="text-muted-foreground">
-              Quando fraudes forem reportadas, elas aparecerão aqui
-            </p>
-          </Card>
+          <EmptyState
+            title="Nenhuma fraude reportada"
+            description="Quando fraudes forem reportadas, elas aparecerão aqui"
+          />
         )}
       </div>
     </div>

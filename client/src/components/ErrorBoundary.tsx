@@ -21,8 +21,18 @@ class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Logar erro em produção (pode ser enviado para serviço de logging)
+    if (process.env.NODE_ENV === "production") {
+      // TODO: Enviar para serviço de logging centralizado
+      console.error("[ErrorBoundary] Erro capturado:", error, errorInfo);
+    }
+  }
+
   render() {
     if (this.state.hasError) {
+      const isDevelopment = process.env.NODE_ENV === "development";
+      
       return (
         <div className="flex items-center justify-center min-h-screen p-8 bg-background">
           <div className="flex flex-col items-center w-full max-w-2xl p-8">
@@ -31,13 +41,31 @@ class ErrorBoundary extends Component<Props, State> {
               className="text-destructive mb-6 flex-shrink-0"
             />
 
-            <h2 className="text-xl mb-4">An unexpected error occurred.</h2>
+            <h2 className="text-xl mb-4">Ocorreu um erro inesperado</h2>
+            
+            <p className="text-muted-foreground mb-6 text-center">
+              {isDevelopment
+                ? "Verifique os detalhes abaixo e o console para mais informações."
+                : "Por favor, recarregue a página ou entre em contato com o suporte se o problema persistir."}
+            </p>
 
-            <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
-              <pre className="text-sm text-muted-foreground whitespace-break-spaces">
-                {this.state.error?.stack}
-              </pre>
-            </div>
+            {/* Stack trace apenas em desenvolvimento */}
+            {isDevelopment && this.state.error?.stack && (
+              <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
+                <pre className="text-sm text-muted-foreground whitespace-break-spaces">
+                  {this.state.error.stack}
+                </pre>
+              </div>
+            )}
+
+            {/* Mensagem de erro genérica em produção */}
+            {!isDevelopment && this.state.error && (
+              <div className="p-4 w-full rounded bg-muted mb-6">
+                <p className="text-sm text-muted-foreground">
+                  {this.state.error.message || "Erro desconhecido"}
+                </p>
+              </div>
+            )}
 
             <button
               onClick={() => window.location.reload()}
@@ -48,7 +76,7 @@ class ErrorBoundary extends Component<Props, State> {
               )}
             >
               <RotateCcw size={16} />
-              Reload Page
+              Recarregar Página
             </button>
           </div>
         </div>

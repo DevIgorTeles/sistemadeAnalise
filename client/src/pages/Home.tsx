@@ -1,9 +1,9 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "wouter";
 import {
-  Loader2,
   Plus,
   AlertCircle,
   FileSpreadsheet,
@@ -11,9 +11,18 @@ import {
   LineChart,
   ClipboardList,
   ShieldAlert,
+  TrendingUp,
+  Clock,
+  BarChart3,
+  Calendar,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { APP_TITLE } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { useMemo } from "react";
+import { LoadingState } from "@/components/common/LoadingState";
+import { usePeriodo } from "@/hooks/usePeriodo";
+import { formatarTempo, formatarDataHora } from "@/utils/formatters";
 
 type AccentKey = "primary" | "warning" | "destructive" | "accent" | "info" | "muted";
 
@@ -41,15 +50,51 @@ export default function Home() {
     redirectPath: "/login",
   });
 
-  if (loading || !user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={36} />
-      </div>
-    );
-  }
+  const isAdmin = user?.role === "admin";
+  const isAnalista = user?.role === "analista";
 
-  const isAdmin = user.role === "admin";
+  // Hook para gerenciar período das métricas
+  const { periodo: periodoMetricas, setPeriodo: setPeriodoMetricas, dataInicio, dataFim } = usePeriodo("hoje");
+
+  // Buscar métricas individuais para analistas
+  const { data: analisesAnalista, isLoading: loadingMetricas } = trpc.metricas.getAnalises.useQuery(
+    {
+      analista_id: isAnalista ? user?.id : undefined,
+      data_inicio: isAnalista ? dataInicio : undefined,
+      data_fim: isAnalista ? dataFim : undefined,
+    },
+    {
+      enabled: Boolean(user && isAnalista),
+    }
+  );
+
+  // Calcular métricas do analista
+  const metricasAnalista = useMemo(() => {
+    if (!analisesAnalista || analisesAnalista.length === 0) {
+      return {
+        totalAnalises: 0,
+        totalSaques: 0,
+        totalDepositos: 0,
+        tempoMedioSegundos: 0,
+      };
+    }
+
+    const saques = analisesAnalista.filter(a => a.tipoAnalise === "SAQUE").length;
+    const depositos = analisesAnalista.filter(a => a.tipoAnalise === "DEPOSITO").length;
+    const tempoTotal = analisesAnalista.reduce((sum, a) => sum + (a.tempoAnaliseSegundos || 0), 0);
+    const tempoMedio = analisesAnalista.length > 0 ? Math.round(tempoTotal / analisesAnalista.length) : 0;
+
+    return {
+      totalAnalises: analisesAnalista.length,
+      totalSaques: saques,
+      totalDepositos: depositos,
+      tempoMedioSegundos: tempoMedio,
+    };
+  }, [analisesAnalista]);
+
+  if (loading || !user) {
+    return <LoadingState size={36} />;
+  }
 
   const quickActions: QuickAction[] = [
     {
@@ -185,7 +230,7 @@ export default function Home() {
                 </p>
                 <p className="text-sm text-foreground">
                   {user?.lastSignedIn
-                    ? new Date(user.lastSignedIn).toLocaleString("pt-BR")
+                    ? formatarDataHora(user.lastSignedIn)
                     : "Sessão atual"}
                 </p>
               </div>
@@ -198,6 +243,76 @@ export default function Home() {
             </div>
           </Card>
         </div>
+
+        {/* Métricas Individuais para Analistas */}
+        {isAnalista && (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Suas Métricas</h2>
+                <p className="text-xs text-muted-foreground">
+                  Acompanhe seu desempenho individual
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <Select value={periodoMetricas} onValueChange={(value) => setPeriodoMetricas(value as "hoje" | "ontem" | "mes")}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Período" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hoje">Hoje</SelectItem>
+                    <SelectItem value="ontem">Ontem</SelectItem>
+                    <SelectItem value="mes">Este Mês</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {loadingMetricas ? (
+              <LoadingState className="min-h-[200px]" size={32} />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="glass-card p-6 border border-border/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Total de Análises</span>
+                    <BarChart3 className="h-5 w-5 text-sky-400" />
+                  </div>
+                  <p className="text-3xl font-bold text-foreground">{metricasAnalista.totalAnalises}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Análises realizadas</p>
+                </Card>
+
+                <Card className="glass-card p-6 border border-border/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Saques</span>
+                    <TrendingUp className="h-5 w-5 text-emerald-400" />
+                  </div>
+                  <p className="text-3xl font-bold text-foreground">{metricasAnalista.totalSaques}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Análises de saque</p>
+                </Card>
+
+                <Card className="glass-card p-6 border border-border/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Depósitos</span>
+                    <TrendingUp className="h-5 w-5 text-blue-400" />
+                  </div>
+                  <p className="text-3xl font-bold text-foreground">{metricasAnalista.totalDepositos}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Análises de depósito</p>
+                </Card>
+
+                <Card className="glass-card p-6 border border-border/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-muted-foreground">Tempo Médio</span>
+                    <Clock className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <p className="text-3xl font-bold text-foreground">
+                    {formatarTempo(metricasAnalista.tempoMedioSegundos)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Por análise</p>
+                </Card>
+              </div>
+            )}
+          </section>
+        )}
 
         <section>
           <div className="flex items-center justify-between mb-4">
@@ -229,8 +344,6 @@ export default function Home() {
             })}
           </div>
         </section>
-
-        {/* Section removed per request */}
       </main>
     </div>
   );

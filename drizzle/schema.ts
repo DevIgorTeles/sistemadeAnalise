@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, date, json } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, date, json, index } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
 
 /**
@@ -23,7 +23,14 @@ export const users = mysqlTable("users", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   password: varchar("password", { length: 255 }), // Adicionado para autenticação local
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, (table) => ({
+  // Índice em email para consultas de login (buscas frequentes)
+  emailIdx: index("idx_users_email").on(table.email),
+  // Índice composto para listagens filtradas
+  roleAtivoIdx: index("idx_users_role_ativo").on(table.role, table.ativo),
+  // Índice em lastSignedIn para ordenações
+  lastSignedInIdx: index("idx_users_last_signed_in").on(table.lastSignedIn),
+}));
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -42,22 +49,59 @@ export type Cliente = typeof clientes.$inferSelect;
 export type InsertCliente = typeof clientes.$inferInsert;
 
 /**
- * Analises table: stores analysis records with Saque and Deposito fields
+ * Saques table: stores SAQUE analysis records
  */
-export const analises = mysqlTable("analises", {
+export const saques = mysqlTable("saques", {
   id: int("id").autoincrement().primaryKey(),
   idCliente: varchar("id_cliente", { length: 64 }).notNull(),
   nomeCompleto: varchar("nome_completo", { length: 255 }),
   dataAnalise: date("data_analise").notNull(),
   dataCriacaoConta: date("data_criacao_conta"),
-  tipoAnalise: varchar("tipo_analise", { length: 20 }), // SAQUE ou DEPOSITO
-  // Campos para Analise de Saque
+  // Campos específicos de Saque
   horarioSaque: varchar("horario_saque", { length: 8 }), // HH:MM:SS
   valorSaque: decimal("valor_saque", { precision: 18, scale: 2 }),
   metricaSaque: varchar("metrica_saque", { length: 100 }), // Ex: SALDO 1000->4.999
   categoriaSaque: varchar("categoria_saque", { length: 50 }), // CASSINO, SPORTBOOK, OUTROS
   jogoEsporteSaque: varchar("jogo_esporte_saque", { length: 255 }),
-  // Campos para Analise de Deposito
+  financeiro: decimal("financeiro", { precision: 18, scale: 2 }), // Positivo = casa ganhando, Negativo = cliente dando lucro
+  // Tempo de Analise
+  tempoAnaliseSegundos: int("tempo_analise_segundos"), // Duracao em segundos
+  // Legacy CSV-compatible columns
+  qtdApostas: int("qtd_apostas"),
+  retornoApostas: decimal("retorno_apostas", { precision: 18, scale: 2 }),
+  observacao: text("observacao"),
+  // Internal BD2 fields
+  fonteConsulta: varchar("fonte_consulta", { length: 64 }),
+  auditoriaUsuario: int("auditoria_usuario"),
+  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando análise for marcada como auditoria
+}, (table) => ({
+  // Índice composto mais usado: busca saques por cliente e data
+  clienteDataIdx: index("idx_saques_cliente_data").on(table.idCliente, table.dataAnalise),
+  // Índice em idCliente para listagens de saques de um cliente
+  clienteIdx: index("idx_saques_cliente").on(table.idCliente),
+  // Índice em dataAnalise para ordenações e filtros por data
+  dataAnaliseIdx: index("idx_saques_data").on(table.dataAnalise),
+  // Índice em auditoriaUsuario para filtrar por analista
+  auditoriaUsuarioIdx: index("idx_saques_auditoria_usuario").on(table.auditoriaUsuario),
+  // Índice em auditoriaData para ordenações
+  auditoriaDataIdx: index("idx_saques_auditoria_data").on(table.auditoriaData),
+  // Índice composto para métricas por analista e data
+  usuarioDataIdx: index("idx_saques_usuario_data").on(table.auditoriaUsuario, table.dataAnalise),
+}));
+
+export type Saque = typeof saques.$inferSelect;
+export type InsertSaque = typeof saques.$inferInsert;
+
+/**
+ * Depositos table: stores DEPOSITO analysis records
+ */
+export const depositos = mysqlTable("depositos", {
+  id: int("id").autoincrement().primaryKey(),
+  idCliente: varchar("id_cliente", { length: 64 }).notNull(),
+  nomeCompleto: varchar("nome_completo", { length: 255 }),
+  dataAnalise: date("data_analise").notNull(),
+  dataCriacaoConta: date("data_criacao_conta"),
+  // Campos específicos de Deposito
   valorDeposito: decimal("valor_deposito", { precision: 18, scale: 2 }),
   ganhoPerda: decimal("ganho_perda", { precision: 18, scale: 2 }), // Positivo = ganho, Negativo = perda
   financeiro: decimal("financeiro", { precision: 18, scale: 2 }), // Positivo = casa ganhando, Negativo = cliente dando lucro
@@ -72,11 +116,24 @@ export const analises = mysqlTable("analises", {
   // Internal BD2 fields
   fonteConsulta: varchar("fonte_consulta", { length: 64 }),
   auditoriaUsuario: int("auditoria_usuario"),
-  auditoriaData: timestamp("auditoria_data").defaultNow().notNull(),
-});
+  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando análise for marcada como auditoria
+}, (table) => ({
+  // Índice composto mais usado: busca depositos por cliente e data
+  clienteDataIdx: index("idx_depositos_cliente_data").on(table.idCliente, table.dataAnalise),
+  // Índice em idCliente para listagens de depositos de um cliente
+  clienteIdx: index("idx_depositos_cliente").on(table.idCliente),
+  // Índice em dataAnalise para ordenações e filtros por data
+  dataAnaliseIdx: index("idx_depositos_data").on(table.dataAnalise),
+  // Índice em auditoriaUsuario para filtrar por analista
+  auditoriaUsuarioIdx: index("idx_depositos_auditoria_usuario").on(table.auditoriaUsuario),
+  // Índice em auditoriaData para ordenações
+  auditoriaDataIdx: index("idx_depositos_auditoria_data").on(table.auditoriaData),
+  // Índice composto para métricas por analista e data
+  usuarioDataIdx: index("idx_depositos_usuario_data").on(table.auditoriaUsuario, table.dataAnalise),
+}));
 
-export type Analise = typeof analises.$inferSelect;
-export type InsertAnalise = typeof analises.$inferInsert;
+export type Deposito = typeof depositos.$inferSelect;
+export type InsertDeposito = typeof depositos.$inferInsert;
 
 /**
  * Fraudes table: stores fraud reports
@@ -88,7 +145,14 @@ export const fraudes = mysqlTable("fraudes", {
   motivoPadrao: varchar("motivo_padrao", { length: 255 }).notNull(),
   motivoLivre: text("motivo_livre"),
   analistaId: int("analista_id"),
-});
+}, (table) => ({
+  // Índice em idCliente para buscar fraudes de um cliente
+  clienteIdx: index("idx_fraudes_cliente").on(table.idCliente),
+  // Índice em dataRegistro para ordenações
+  dataRegistroIdx: index("idx_fraudes_data_registro").on(table.dataRegistro),
+  // Índice em analistaId para filtrar por analista
+  analistaIdx: index("idx_fraudes_analista").on(table.analistaId),
+}));
 
 export type Fraude = typeof fraudes.$inferSelect;
 export type InsertFraude = typeof fraudes.$inferInsert;
@@ -103,7 +167,18 @@ export const auditorias = mysqlTable("auditorias", {
   tipo: mysqlEnum("tipo", ["ESPORTIVO", "CASSINO"]).notNull(),
   analistaId: int("analista_id").notNull(),
   criadoEm: timestamp("criado_em").defaultNow().notNull(),
-});
+}, (table) => ({
+  // Índice em idCliente para buscar auditorias de um cliente
+  clienteIdx: index("idx_auditorias_cliente").on(table.idCliente),
+  // Índice composto: cliente + criadoEm para ordenações
+  clienteCriadoIdx: index("idx_auditorias_cliente_criado").on(table.idCliente, table.criadoEm),
+  // Índice em criadoEm para ordenações gerais
+  criadoEmIdx: index("idx_auditorias_criado").on(table.criadoEm),
+  // Índice em analistaId para filtrar por analista
+  analistaIdx: index("idx_auditorias_analista").on(table.analistaId),
+  // Índice composto para listagens filtradas
+  tipoAnalistaIdx: index("idx_auditorias_tipo_analista").on(table.tipo, table.analistaId),
+}));
 
 export type Auditoria = typeof auditorias.$inferSelect;
 export type InsertAuditoria = typeof auditorias.$inferInsert;
@@ -122,25 +197,66 @@ export const logsAuditoria = mysqlTable("logs_auditoria", {
 export type LogAuditoria = typeof logsAuditoria.$inferSelect;
 export type InsertLogAuditoria = typeof logsAuditoria.$inferInsert;
 
+/**
+ * Refresh tokens: armazenamento seguro de tokens de refresh
+ * Permite revogação e rotação de tokens
+ */
+export const refreshTokens = mysqlTable("refresh_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  userId: int("user_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  ipAddress: varchar("ip_address", { length: 45 }), // Suporta IPv6
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  // Índice em userId para revogar todos os tokens de um usuário
+  userIdIdx: index("idx_refresh_tokens_user_id").on(table.userId),
+  // Índice em expiresAt para limpeza de tokens expirados
+  expiresAtIdx: index("idx_refresh_tokens_expires_at").on(table.expiresAt),
+  // Índice composto para queries de validação
+  userIdRevokedIdx: index("idx_refresh_tokens_user_revoked").on(table.userId, table.revokedAt),
+}));
+
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type InsertRefreshToken = typeof refreshTokens.$inferInsert;
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
-  analises: many(analises),
+  saques: many(saques),
+  depositos: many(depositos),
   fraudes: many(fraudes),
+  refreshTokens: many(refreshTokens),
 }));
 
 export const clientesRelations = relations(clientes, ({ many }) => ({
-  analises: many(analises),
+  saques: many(saques),
+  depositos: many(depositos),
   fraudes: many(fraudes),
   auditorias: many(auditorias),
 }));
 
-export const analisesRelations = relations(analises, ({ one }) => ({
+// Relações para tabela saques
+export const saquesRelations = relations(saques, ({ one }) => ({
   cliente: one(clientes, {
-    fields: [analises.idCliente],
+    fields: [saques.idCliente],
     references: [clientes.idCliente],
   }),
   usuario: one(users, {
-    fields: [analises.auditoriaUsuario],
+    fields: [saques.auditoriaUsuario],
+    references: [users.id],
+  }),
+}));
+
+// Relações para tabela depositos
+export const depositosRelations = relations(depositos, ({ one }) => ({
+  cliente: one(clientes, {
+    fields: [depositos.idCliente],
+    references: [clientes.idCliente],
+  }),
+  usuario: one(users, {
+    fields: [depositos.auditoriaUsuario],
     references: [users.id],
   }),
 }));
@@ -163,6 +279,13 @@ export const auditoriasRelations = relations(auditorias, ({ one }) => ({
   }),
   analista: one(users, {
     fields: [auditorias.analistaId],
+    references: [users.id],
+  }),
+}));
+
+export const refreshTokensRelations = relations(refreshTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [refreshTokens.userId],
     references: [users.id],
   }),
 }));

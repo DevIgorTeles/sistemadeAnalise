@@ -3,11 +3,20 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Users, Clock, DollarSign, Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
+import { LoadingState } from "@/components/common/LoadingState";
+import { formatarTempo, formatarMoeda, formatarData, formatarDataHora } from "@/utils/formatters";
 
 export default function Relatorios() {
   const { user, loading } = useAuth({
@@ -24,6 +33,9 @@ export default function Relatorios() {
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [tipoAnalise, setTipoAnalise] = useState<"SAQUE" | "DEPOSITO" | "">("");
+  const [idClienteFiltro, setIdClienteFiltro] = useState("");
+  const [analiseSelecionada, setAnaliseSelecionada] = useState<any>(null);
+  const [modalAberto, setModalAberto] = useState(false);
   const [analisesVisiveis, setAnalisesVisiveis] = useState(10);
   const [usuariosVisiveis, setUsuariosVisiveis] = useState(10);
   const [tempoMedioUsuariosVisiveis, setTempoMedioUsuariosVisiveis] = useState(9);
@@ -34,26 +46,18 @@ export default function Relatorios() {
     totalDepositos: 0,
     tempoMedioSegundos: 0,
     taxaFraude: 0,
-    ganhoTotalCasa: 0,
     analisesPorUsuario: {} as Record<string, number>,
     tempoMedioPorUsuario: {} as Record<string, number>,
   });
 
-  if (loading || !user || user.role !== "admin") {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
-
-  // Fetch métricas
+  // Fetch métricas - deve estar antes de qualquer return
   const { data: analises, isLoading } = trpc.metricas.getAnalises.useQuery(
     {
       analista_id: user?.role === "admin" ? undefined : user?.id,
       data_inicio: dataInicio ? new Date(dataInicio) : undefined,
       data_fim: dataFim ? new Date(dataFim) : undefined,
       tipo_analise: tipoAnalise || undefined,
+      id_cliente: idClienteFiltro || undefined,
     },
     {
       enabled: Boolean(user && user.role === "admin"),
@@ -68,11 +72,6 @@ export default function Relatorios() {
       const depositos = analises.filter(a => a.tipoAnalise === "DEPOSITO").length;
       const tempoTotal = analises.reduce((sum, a) => sum + (a.tempoAnaliseSegundos || 0), 0);
       const tempoMedio = analises.length > 0 ? Math.round(tempoTotal / analises.length) : 0;
-      
-      const ganhoTotal = analises.reduce((sum, a) => {
-        const ganho = parseFloat(a.ganhoPerda?.toString() || "0");
-        return sum + ganho;
-      }, 0);
 
       // Análises por usuário
       const analisesPorUsuario: Record<string, number> = {};
@@ -100,7 +99,6 @@ export default function Relatorios() {
         totalDepositos: depositos,
         tempoMedioSegundos: tempoMedio,
         taxaFraude: 0,
-        ganhoTotalCasa: ganhoTotal,
         analisesPorUsuario,
         tempoMedioPorUsuario,
       });
@@ -169,18 +167,6 @@ export default function Relatorios() {
     toast.success("Relatório exportado com sucesso");
   };
 
-  const formatarTempo = (segundos: number) => {
-    const minutos = Math.floor(segundos / 60);
-    const segs = segundos % 60;
-    return `${minutos}m ${segs}s`;
-  };
-
-  const formatarMoeda = (valor: number) => {
-    return new Intl.NumberFormat("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    }).format(valor);
-  };
 
 const getTipoBadgeClass = (tipo: "SAQUE" | "DEPOSITO" | null | undefined) => {
   if (tipo === "SAQUE") {
@@ -222,16 +208,21 @@ const categoriaClasses: Record<string, string> = {
   "N/A": "bg-muted/15 text-muted-foreground border border-border/40",
 };
 
-const getCategoriaBadgeClass = (categoria?: string | null) => {
-  if (!categoria) {
-    return "bg-muted/15 text-muted-foreground border border-border/40";
-  }
-  const normalizada = categoria.toUpperCase();
-  return categoriaClasses[normalizada] || "bg-muted/15 text-muted-foreground border border-border/40";
-};
+  const getCategoriaBadgeClass = (categoria?: string | null) => {
+    if (!categoria) {
+      return "bg-muted/15 text-muted-foreground border border-border/40";
+    }
+    const normalizada = categoria.toUpperCase();
+    return categoriaClasses[normalizada] || "bg-muted/15 text-muted-foreground border border-border/40";
+  };
 
   // Cores para gráficos
   const cores = ["#0088ff", "#00d4ff", "#00ff88", "#ffaa00", "#ff6b6b", "#c084fc"];
+
+  // Early return após todos os hooks
+  if (loading || !user || user.role !== "admin") {
+    return <LoadingState />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28]">
@@ -293,19 +284,30 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                 <option value="DEPOSITO">Depósito</option>
               </select>
             </div>
-            <div className="flex items-end">
-              <Button
-                onClick={() => {
-                  setDataInicio("");
-                  setDataFim("");
-                  setTipoAnalise("");
-                }}
-                variant="outline"
-                className="w-full"
-              >
-                Limpar Filtros
-              </Button>
+            <div>
+              <Label className="text-muted-foreground mb-2 block">ID do Cliente</Label>
+              <Input
+                type="text"
+                value={idClienteFiltro}
+                onChange={(e) => setIdClienteFiltro(e.target.value)}
+                placeholder="Filtrar por ID do cliente"
+                className="bg-background/50 border-border text-foreground"
+              />
             </div>
+          </div>
+          <div className="mt-4">
+            <Button
+              onClick={() => {
+                setDataInicio("");
+                setDataFim("");
+                setTipoAnalise("");
+                setIdClienteFiltro("");
+              }}
+              variant="outline"
+              className="w-full md:w-auto"
+            >
+              Limpar Filtros
+            </Button>
           </div>
         </Card>
 
@@ -353,29 +355,6 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
             </div>
           </Card>
         </div>
-
-        {/* Ganho/Perda da Casa */}
-        <Card className="glass-card p-6 mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground mb-4">Ganho/Perda da Casa</h2>
-              <p className="text-sm text-muted-foreground mb-2">Total Acumulado</p>
-              <p
-                className={`text-4xl font-bold ${
-                  metricas.ganhoTotalCasa >= 0 ? "text-[#0088ff]" : "text-destructive"
-                }`}
-              >
-                {formatarMoeda(metricas.ganhoTotalCasa)}
-              </p>
-            </div>
-            <div className="text-right">
-              <DollarSign className="text-[#0088ff] mb-2" size={40} />
-              <p className="text-lg font-semibold text-muted-foreground">
-                {metricas.ganhoTotalCasa >= 0 ? "✓ Positivo" : "✗ Negativo"}
-              </p>
-            </div>
-          </div>
-        </Card>
 
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -447,6 +426,8 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
             <div className="space-y-4 flex-1 overflow-y-auto pr-1">
               {usuariosLimitados.length > 0 ? (
                 usuariosLimitados.map(([usuario, count], idx) => {
+                  // Key única usando nome do usuário e índice
+                  const uniqueKey = `usuario-${usuario}-${idx}`;
                   const maxValor =
                     usuariosOrdenados.length > 0
                       ? usuariosOrdenados[0][1]
@@ -458,7 +439,7 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                   }
 
                   return (
-                    <div key={usuario}>
+                    <div key={uniqueKey}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm text-muted-foreground truncate">
                           {usuario}
@@ -515,12 +496,16 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
           <h3 className="text-lg font-semibold text-foreground mb-4">Tempo Médio por Usuário</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
             {tempoMedioUsuariosLimitados.length > 0 ? (
-              tempoMedioUsuariosLimitados.map(([usuario, tempo]) => (
-                <div key={usuario} className="p-4 border border-border/50 rounded-lg hover:border-accent/50 transition-colors">
-                  <p className="text-sm text-muted-foreground mb-2 truncate">{usuario}</p>
-                  <p className="text-2xl font-bold text-accent">{formatarTempo(tempo)}</p>
-                </div>
-              ))
+              tempoMedioUsuariosLimitados.map(([usuario, tempo], idx) => {
+                // Key única usando nome do usuário e índice
+                const uniqueKey = `tempo-${usuario}-${idx}`;
+                return (
+                  <div key={uniqueKey} className="p-4 border border-border/50 rounded-lg hover:border-accent/50 transition-colors">
+                    <p className="text-sm text-muted-foreground mb-2 truncate">{usuario}</p>
+                    <p className="text-2xl font-bold text-accent">{formatarTempo(tempo)}</p>
+                  </div>
+                );
+              })
             ) : (
               <p className="text-muted-foreground">Nenhum dado</p>
             )}
@@ -571,7 +556,7 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {analisesLimitadas.map((analise) => {
+                  {analisesLimitadas.map((analise, index) => {
                     const valorNumerico = parseFloat(
                       analise.tipoAnalise === "SAQUE"
                         ? analise.valorSaque?.toString() || "0"
@@ -589,12 +574,22 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
                         ? "DEPOSITO"
                         : null;
 
+                    // Key única combinando tipo e ID para evitar duplicatas entre saques e depositos
+                    const uniqueKey = `${analise.tipoAnalise || 'UNKNOWN'}-${analise.id}-${index}`;
+
                     return (
-                      <tr key={analise.id} className="border-b border-border/50 hover:bg-background/50">
+                      <tr 
+                        key={uniqueKey} 
+                        className="border-b border-border/50 hover:bg-background/50 cursor-pointer transition-colors"
+                        onClick={() => {
+                          setAnaliseSelecionada(analise);
+                          setModalAberto(true);
+                        }}
+                      >
                         <td className="py-3 px-4 text-foreground">{analise.idCliente}</td>
                         <td className="py-3 px-4 text-foreground">{analise.nomeCompleto || "—"}</td>
                         <td className="py-3 px-4 text-muted-foreground">
-                          {analise.dataAnalise?.toString().split("T")[0]}
+                          {formatarData(analise.dataAnalise)}
                         </td>
                         <td className="py-3 px-4">
                           <span
@@ -645,6 +640,164 @@ const getCategoriaBadgeClass = (categoria?: string | null) => {
             <p className="text-muted-foreground">Nenhuma análise encontrada</p>
           )}
         </Card>
+
+        {/* Modal de Detalhes da Análise */}
+        <Dialog open={modalAberto} onOpenChange={setModalAberto}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Detalhes da Análise</DialogTitle>
+              <DialogDescription>
+                Informações completas da análise realizada
+              </DialogDescription>
+            </DialogHeader>
+            {analiseSelecionada && (
+              <div className="space-y-6 mt-4">
+                {/* Informações Básicas */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-muted-foreground text-sm">ID do Cliente</Label>
+                    <p className="text-foreground font-semibold">{analiseSelecionada.idCliente}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground text-sm">Nome Completo</Label>
+                    <p className="text-foreground font-semibold">{analiseSelecionada.nomeCompleto || "—"}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground text-sm">Data da Análise</Label>
+                    <p className="text-foreground font-semibold">
+                      {formatarData(analiseSelecionada.dataAnalise)}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground text-sm">Data de Criação da Conta</Label>
+                    <p className="text-foreground font-semibold">
+                      {formatarData(analiseSelecionada.dataCriacaoConta)}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground text-sm">Tipo de Análise</Label>
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getTipoBadgeClass(analiseSelecionada.tipoAnalise as any)}`}>
+                      {analiseSelecionada.tipoAnalise || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground text-sm">Tempo de Análise</Label>
+                    <p className="text-foreground font-semibold">
+                      {formatarTempo(analiseSelecionada.tempoAnaliseSegundos || 0)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Campos específicos de SAQUE */}
+                {analiseSelecionada.tipoAnalise === "SAQUE" && (
+                  <div className="border-t border-border pt-4">
+                    <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Saque</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Horário do Saque</Label>
+                        <p className="text-foreground font-semibold">{analiseSelecionada.horarioSaque || "—"}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Valor do Saque</Label>
+                        <p className="text-foreground font-semibold">
+                          {analiseSelecionada.valorSaque ? formatarMoeda(parseFloat(analiseSelecionada.valorSaque.toString())) : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Métrica do Saque</Label>
+                        <p className="text-foreground font-semibold">{analiseSelecionada.metricaSaque || "—"}</p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Categoria</Label>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseSelecionada.categoriaSaque)}`}>
+                          {analiseSelecionada.categoriaSaque || "—"}
+                        </span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label className="text-muted-foreground text-sm">Jogo/Esporte</Label>
+                        <p className="text-foreground font-semibold">{analiseSelecionada.jogoEsporteSaque || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Campos específicos de DEPOSITO */}
+                {analiseSelecionada.tipoAnalise === "DEPOSITO" && (
+                  <div className="border-t border-border pt-4">
+                    <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Depósito</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Valor do Depósito</Label>
+                        <p className="text-foreground font-semibold">
+                          {analiseSelecionada.valorDeposito ? formatarMoeda(parseFloat(analiseSelecionada.valorDeposito.toString())) : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Ganho/Perda</Label>
+                        <p className={`font-semibold ${
+                          parseFloat(analiseSelecionada.ganhoPerda?.toString() || "0") >= 0 
+                            ? "text-emerald-400" 
+                            : "text-rose-400"
+                        }`}>
+                          {analiseSelecionada.ganhoPerda ? formatarMoeda(parseFloat(analiseSelecionada.ganhoPerda.toString())) : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Categoria</Label>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseSelecionada.categoriaDeposito)}`}>
+                          {analiseSelecionada.categoriaDeposito || "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Jogo/Esporte Após Depósito</Label>
+                        <p className="text-foreground font-semibold">{analiseSelecionada.jogoEsporteDepositoApos || "—"}</p>
+                      </div>
+                      {analiseSelecionada.qtdApostas && (
+                        <div>
+                          <Label className="text-muted-foreground text-sm">Quantidade de Apostas</Label>
+                          <p className="text-foreground font-semibold">{analiseSelecionada.qtdApostas}</p>
+                        </div>
+                      )}
+                      {analiseSelecionada.retornoApostas && (
+                        <div>
+                          <Label className="text-muted-foreground text-sm">Retorno das Apostas</Label>
+                          <p className="text-foreground font-semibold">
+                            {formatarMoeda(parseFloat(analiseSelecionada.retornoApostas.toString()))}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Observações */}
+                {analiseSelecionada.observacao && (
+                  <div className="border-t border-border pt-4">
+                    <Label className="text-muted-foreground text-sm">Observações</Label>
+                    <p className="text-foreground mt-2 whitespace-pre-wrap">{analiseSelecionada.observacao}</p>
+                  </div>
+                )}
+
+                {/* Informações de Auditoria */}
+                <div className="border-t border-border pt-4">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Informações de Auditoria</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground text-sm">Fonte de Consulta</Label>
+                      <p className="text-foreground font-semibold">{analiseSelecionada.fonteConsulta || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground text-sm">Data de Auditoria</Label>
+                      <p className="text-foreground font-semibold">
+                        {formatarDataHora(analiseSelecionada.auditoriaData)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

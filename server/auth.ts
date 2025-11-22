@@ -1,8 +1,29 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'seu-secret-super-seguro-aqui';
-const JWT_EXPIRY = '24h';
+// Validar JWT_SECRET - deve ser forte e obrigatório
+function validateJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  
+  if (!secret) {
+    throw new Error(
+      'JWT_SECRET não está definido. Configure a variável de ambiente JWT_SECRET com uma chave forte (mínimo 32 caracteres).'
+    );
+  }
+  
+  if (secret.length < 32) {
+    throw new Error(
+      `JWT_SECRET deve ter pelo menos 32 caracteres. Atualmente tem ${secret.length} caracteres. Configure uma chave mais forte na variável de ambiente.`
+    );
+  }
+  
+  return secret;
+}
+
+const JWT_SECRET = validateJwtSecret();
+// Reduzido para 15 minutos para maior segurança
+const JWT_EXPIRY = '15m';
+// Refresh token válido por 7 dias
 const REFRESH_TOKEN_EXPIRY = '7d';
 
 export interface JWTPayload {

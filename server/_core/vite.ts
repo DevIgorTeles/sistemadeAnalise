@@ -21,7 +21,15 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
+  
+  // Fallback para servir index.html - APENAS para rotas que não são da API
+  // O Express processa middlewares na ordem, então rotas da API já foram processadas antes
   app.use("*", async (req, res, next) => {
+    // Não processar rotas da API - elas já foram processadas acima
+    if (req.path.startsWith('/api')) {
+      return next(); // Passar para próximo middleware (ou retornar 404)
+    }
+
     const url = req.originalUrl;
 
     try {

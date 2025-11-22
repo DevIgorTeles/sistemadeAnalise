@@ -9,16 +9,22 @@ import {
   criarAnalise,
   reportarFraude,
   listarFraudes,
+  getFraudesPorCliente,
   registrarAuditoria,
   listarMetricasAnalises,
   upsertUser,
   listarUsuarios,
   getAnalisePorData,
+  getAnalisePorDataETipo,
   registrarAuditoriaAnalise,
   listarAuditorias,
-  getStatusAuditoria
+  getStatusAuditoria,
+  getDataCriacaoConta
 } from "./db";
 import { TRPCError } from "@trpc/server";
+import { sanitizeString, sanitizeStringArray, sanitizeIdentifier } from "./_core/sanitize";
+import { logger } from "./_core/logger";
+import { formatarDataBrasilia, formatarHoraBrasilia, getDataAtualBrasilia, paraISOStringBrasilia } from "./utils/timezone";
 
 const ensureValidDate = (value: string | Date, ctx: z.RefinementCtx) => {
   const parsedDate = value instanceof Date ? value : new Date(value);
@@ -51,7 +57,20 @@ const toDate = (value?: string | Date | null) => {
     return undefined;
   }
 
-  const parsed = value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) {
+    return value;
+  }
+
+  // Se for string no formato YYYY-MM-DD, tratar como data local (não UTC)
+  // Isso evita problemas de timezone que causam diferença de um dia
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [ano, mes, dia] = value.split('-').map(Number);
+    // Criar data no timezone local (Brasil)
+    const date = new Date(ano, mes - 1, dia);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
@@ -61,11 +80,11 @@ const analiseBaseSchema = z.object({
   dataAnalise: dateField,
   dataCriacaoConta: optionalDateField,
   tempoAnaliseSegundos: z.number().int().min(0).optional(),
-  observacao: z.string().trim().min(3, "Observação obrigatória").max(1000),
+  observacao: z.string().trim().max(1000).optional(),
   fonteConsulta: z.string().trim().min(1).optional(),
   qtdApostas: z.number().int().min(0).optional(),
   retornoApostas: z.number().optional(),
-  ganhoPerda: z.number().optional(),
+  ganhoPerda: z.number().optional().nullable(),
 });
 
 // Schemas for validation
@@ -150,16 +169,17 @@ export const appRouter = router({
     criar: protectedProcedure
       .input(z.object({ email: z.string().email(), nome: z.string().min(1), role: z.enum(["analista","admin"]).default("analista"), password: z.string().min(6) }))
       .mutation(async ({ input }) => {
+        // Sanitizar campos de texto antes de salvar
         // Use email as openId for local users created via admin UI
-        const openId = input.email;
+        const openId = sanitizeIdentifier(input.email);
         await upsertUser({
           password: input.password,
           openId,
-          name: input.nome,
-          email: input.email,
+          name: sanitizeString(input.nome),
+          email: sanitizeIdentifier(input.email),
           loginMethod: 'local',
           role: input.role,
-          lastSignedIn: new Date(),
+          lastSignedIn: getDataAtualBrasilia(),
         });
         return { success: true };
       }),
@@ -174,18 +194,35 @@ export const appRouter = router({
         return ultima || null;
       }),
 
+    getDataCriacaoConta: protectedProcedure
+      .input(z.object({ idCliente: z.string() }))
+      .query(async ({ input }) => {
+        const dataCriacaoConta = await getDataCriacaoConta(input.idCliente);
+        return dataCriacaoConta ? dataCriacaoConta.toString() : null;
+      }),
+
     verificarHoje: protectedProcedure
       .input(z.object({
         idCliente: z.string().min(1),
         dataAnalise: z.string(),
+        tipoAnalise: z.enum(["SAQUE", "DEPOSITO"]),
       }))
       .query(async ({ input }) => {
-        const duplicado = await verificarDuplicidade(input.idCliente, input.dataAnalise);
+        const duplicado = await verificarDuplicidade(
+          input.idCliente, 
+          input.dataAnalise,
+          input.tipoAnalise
+        );
         if (!duplicado) {
           return { duplicado: false, analise: null };
         }
 
-        const analise = await getAnalisePorData(input.idCliente, input.dataAnalise);
+        // Buscar a análise mais recente do mesmo tipo e mesma data
+        const analise = await getAnalisePorDataETipo(
+          input.idCliente, 
+          input.dataAnalise,
+          input.tipoAnalise
+        );
         return { duplicado: true, analise: analise || null };
       }),
 
@@ -201,33 +238,61 @@ export const appRouter = router({
             message: "Data da análise inválida",
           });
         }
-        const dataAnaliseStr = dataAnaliseDate.toISOString().slice(0, 10);
+        const dataAnaliseStr = paraISOStringBrasilia(dataAnaliseDate);
 
+        // Verificar duplicidade considerando o tipo de análise
+        // REGRA: Um cliente pode ter apenas 1 análise de SAQUE e 1 análise de DEPOSITO por dia
         const isDuplicado = await verificarDuplicidade(
           normalizedIdCliente,
-          dataAnaliseStr
+          dataAnaliseStr,
+          input.tipoAnalise
         );
         if (isDuplicado) {
+          // Buscar a análise mais recente para obter a data exata
+          const analiseExistente = await getAnalisePorDataETipo(
+            normalizedIdCliente,
+            dataAnaliseStr,
+            input.tipoAnalise
+          );
           throw new TRPCError({
             code: "CONFLICT",
-            message: "Cliente ja analisado hoje. Registro duplicado bloqueado.",
+            message: "Este usuário já foi analisado na data de hoje.",
           });
         }
 
-        const dataCriacaoContaDate = toDate(input.dataCriacaoConta);
-        const observacao = input.observacao.trim();
-        const fonteConsulta = input.fonteConsulta?.trim();
+        // Converter dataCriacaoConta para string YYYY-MM-DD se fornecida
+        // Se for Date, converter para string; se for string, usar diretamente; se undefined, usar null
+        let dataCriacaoContaStr: string | null = null;
+        if (input.dataCriacaoConta) {
+          if (input.dataCriacaoConta instanceof Date) {
+            dataCriacaoContaStr = paraISOStringBrasilia(input.dataCriacaoConta);
+          } else if (typeof input.dataCriacaoConta === 'string') {
+            // Se já for string YYYY-MM-DD, usar diretamente
+            dataCriacaoContaStr = input.dataCriacaoConta;
+          } else {
+            // Tentar converter para Date e depois para string
+            const dataCriacaoContaDate = toDate(input.dataCriacaoConta);
+            dataCriacaoContaStr = dataCriacaoContaDate ? paraISOStringBrasilia(dataCriacaoContaDate) : null;
+          }
+        }
+        
+        // Sanitizar campos de texto antes de salvar
+        const observacao = input.observacao ? sanitizeString(input.observacao.trim()) : undefined;
+        const fonteConsulta = input.fonteConsulta ? sanitizeString(input.fonteConsulta.trim()) : undefined;
 
-        // Create analysis
+        // Create analysis - sanitizar todos os campos de texto
         const analise = {
-          idCliente: normalizedIdCliente,
-          nomeCompleto: input.nomeCompleto.trim(),
-          dataAnalise: dataAnaliseDate,
-          dataCriacaoConta: dataCriacaoContaDate,
+          idCliente: sanitizeIdentifier(normalizedIdCliente),
+          nomeCompleto: sanitizeString(input.nomeCompleto.trim()),
+          // Usar string de data diretamente para evitar problemas de timezone
+          // A data já vem no formato YYYY-MM-DD do frontend
+          dataAnalise: dataAnaliseStr,
+          // Usar string de data ou null (nunca Date object)
+          dataCriacaoConta: dataCriacaoContaStr,
           tipoAnalise: input.tipoAnalise,
           horarioSaque:
             input.tipoAnalise === "SAQUE"
-              ? input.horarioSaque.trim()
+              ? sanitizeString(input.horarioSaque.trim())
               : undefined,
           valorSaque:
             input.tipoAnalise === "SAQUE"
@@ -235,22 +300,22 @@ export const appRouter = router({
               : undefined,
           metricaSaque:
             input.tipoAnalise === "SAQUE"
-              ? input.metricaSaque.trim()
+              ? sanitizeString(input.metricaSaque.trim())
               : undefined,
           categoriaSaque:
             input.tipoAnalise === "SAQUE"
-              ? input.categoriaSaque.trim()
+              ? sanitizeString(input.categoriaSaque.trim())
               : undefined,
           jogoEsporteSaque:
             input.tipoAnalise === "SAQUE"
-              ? input.jogoEsporteSaque.trim()
+              ? sanitizeString(input.jogoEsporteSaque.trim())
               : undefined,
           valorDeposito:
             input.valorDeposito !== undefined
               ? input.valorDeposito.toString()
               : undefined,
           ganhoPerda:
-            input.ganhoPerda !== undefined
+            input.ganhoPerda !== undefined && input.ganhoPerda !== null
               ? input.ganhoPerda.toString()
               : undefined,
           financeiro:
@@ -259,11 +324,11 @@ export const appRouter = router({
               : undefined,
           categoriaDeposito:
             input.tipoAnalise === "DEPOSITO"
-              ? input.categoriaDeposito.trim()
+              ? sanitizeString(input.categoriaDeposito.trim())
               : undefined,
           jogoEsporteDepositoApos:
             input.tipoAnalise === "DEPOSITO"
-              ? input.jogoEsporteDepositoApos.trim()
+              ? sanitizeString(input.jogoEsporteDepositoApos.trim())
               : undefined,
           tempoAnaliseSegundos: input.tempoAnaliseSegundos,
           qtdApostas: input.qtdApostas,
@@ -274,7 +339,9 @@ export const appRouter = router({
           observacao,
           fonteConsulta: fonteConsulta && fonteConsulta.length > 0 ? fonteConsulta : undefined,
           auditoriaUsuario: ctx.user.id,
-          auditoriaData: new Date(),
+          // auditoriaData só é preenchido quando a análise for marcada como auditoria
+          // Isso será feito posteriormente pela rota auditorias.registrar
+          auditoriaData: undefined,
         };
 
         await criarAnalise(analise);
@@ -308,9 +375,10 @@ export const appRouter = router({
           throw new TRPCError({ code: "UNAUTHORIZED" });
         }
 
+        // Sanitizar campos de texto antes de salvar
         await registrarAuditoriaAnalise({
-          idCliente: input.idCliente,
-          motivo: input.motivo,
+          idCliente: sanitizeIdentifier(input.idCliente),
+          motivo: sanitizeString(input.motivo),
           tipo: input.tipo,
           analistaId: ctx.user.id,
         });
@@ -328,14 +396,40 @@ export const appRouter = router({
     listar: protectedProcedure
       .input(auditoriaFiltroSchema.optional())
       .query(async ({ input }) => {
-        const auditorias = await listarAuditorias(input ?? {});
-        return auditorias;
+        try {
+          const auditorias = await listarAuditorias(input ?? {});
+          return auditorias;
+        } catch (error) {
+          logger.logError(
+            "Erro ao listar auditorias",
+            error instanceof Error ? error : new Error(String(error)),
+            undefined,
+            { input }
+          );
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Erro ao buscar auditorias",
+          });
+        }
       }),
 
     status: protectedProcedure
       .input(z.object({ idCliente: z.string().min(1) }))
       .query(async ({ input }) => {
-        return await getStatusAuditoria(input.idCliente);
+        try {
+          return await getStatusAuditoria(input.idCliente);
+        } catch (error) {
+          logger.logError(
+            "Erro ao buscar status de auditoria",
+            error instanceof Error ? error : new Error(String(error)),
+            undefined,
+            { idCliente: input.idCliente }
+          );
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Erro ao buscar status de auditoria",
+          });
+        }
       }),
   }),
 
@@ -347,6 +441,7 @@ export const appRouter = router({
         data_inicio: z.date().optional(),
         data_fim: z.date().optional(),
         tipo_analise: z.enum(["SAQUE", "DEPOSITO"]).optional(),
+        id_cliente: z.string().optional(),
       }))
       .query(async ({ input }) => {
         return await listarMetricasAnalises(input);
@@ -358,10 +453,13 @@ export const appRouter = router({
     reportar: protectedProcedure
       .input(fraudeSchema)
       .mutation(async ({ input, ctx }) => {
+        // Sanitizar campos de texto antes de salvar
         const fraude = {
-          ...input,
+          idCliente: sanitizeIdentifier(input.idCliente),
+          motivoPadrao: sanitizeString(input.motivoPadrao),
+          motivoLivre: input.motivoLivre ? sanitizeString(input.motivoLivre) : undefined,
           analistaId: ctx.user.id,
-          dataRegistro: new Date(),
+          dataRegistro: getDataAtualBrasilia(),
         };
 
         await reportarFraude(fraude);
@@ -372,6 +470,16 @@ export const appRouter = router({
         }, ctx.user.id);
 
         return { success: true };
+      }),
+
+    status: protectedProcedure
+      .input(z.object({ idCliente: z.string().min(1) }))
+      .query(async ({ input }) => {
+        const fraudesCliente = await getFraudesPorCliente(input.idCliente);
+        return {
+          temFraude: fraudesCliente.length > 0,
+          fraudes: fraudesCliente,
+        };
       }),
 
     listar: protectedProcedure

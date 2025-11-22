@@ -16,30 +16,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { AlertCircle, Loader2, ArrowLeft, Clock } from "lucide-react";
+import { AlertCircle, Loader2, ArrowLeft, Shield } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-
-type TipoAnalise = "SAQUE" | "DEPOSITO";
-
-const METRICAS_SAQUE = [
-  "SALDO 1000->4.999",
-  "SALDO 5000->9.999",
-  "SALDO 10000->5.0000",
-  "SAQUE MENSAL 5000->9.999",
-  "SAQUE MENSAL 10.000->29.999",
-  "SAQUE MENSAL 30.000->69.999",
-  "SAQUE MENSAL 80.000->99.999",
-  "SAQUE MENSAL 100.000->200.000",
-  "APOSTAS 1000->4.999",
-  "APOSTAS 5.000->9.999",
-  "APOSTAS 10.000->29.000",
-  "APOSTAS 30.000->40.999",
-  "APOSTAS 50.000->79.999",
-];
-
-const CATEGORIAS = ["CASSINO", "SPORTBOOK", "N/A"];
+import { TipoAnalise, METRICAS_SAQUE, CATEGORIAS, TipoAuditoria } from "@/constants/analise";
+import { LoadingState } from "@/components/common/LoadingState";
+import { PageHeader } from "@/components/common/PageHeader";
+import { TipoAnaliseSelector } from "@/components/analise/TipoAnaliseSelector";
+import { TimerCard } from "@/components/analise/TimerCard";
+import { DuplicadoAlert } from "@/components/analise/DuplicadoAlert";
+import { MultiSelect } from "@/components/analise/MultiSelect";
+import { useTimer } from "@/hooks/useTimer";
+import { formatarDataHora } from "@/utils/formatters";
+import { getDataHojeBrasilia, paraISOStringBrasilia } from "@/utils/timezone";
 
 export default function NovaAnalise() {
   const { user, loading } = useAuth({
@@ -47,31 +37,25 @@ export default function NovaAnalise() {
     redirectPath: "/login",
   });
   const [, navigate] = useLocation();
-
-  if (loading || !user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
   
+  // Todos os hooks devem ser chamados antes de qualquer return condicional
   const [tipoAnalise, setTipoAnalise] = useState<TipoAnalise>("SAQUE");
   const [idCliente, setIdCliente] = useState("");
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [dataCriacaoConta, setDataCriacaoConta] = useState("");
-  const [dataAnalise, setDataAnalise] = useState(new Date().toISOString().split("T")[0]);
+  // Usar data atual no fuso horário de Brasília
+  const [dataAnalise, setDataAnalise] = useState(getDataHojeBrasilia());
   
   // Campos Saque
   const [horarioSaque, setHorarioSaque] = useState("");
   const [valorSaque, setValorSaque] = useState("");
-  const [metricaSaque, setMetricaSaque] = useState("");
-  const [categoriaSaque, setCategoriaSaque] = useState("");
+  const [metricasSaque, setMetricasSaque] = useState<string[]>([]);
+  const [categoriasSaque, setCategoriasSaque] = useState<string[]>([]);
   const [jogoEsporteSaque, setJogoEsporteSaque] = useState("");
   
   // Campos Depósito
   const [valorDeposito, setValorDeposito] = useState("");
-  const [categoriaDeposito, setCategoriaDeposito] = useState("");
+  const [categoriasDeposito, setCategoriasDeposito] = useState<string[]>([]);
   const [jogoEsporteDepositoApos, setJogoEsporteDepositoApos] = useState("");
   const [financeiro, setFinanceiro] = useState("");
   
@@ -85,112 +69,168 @@ export default function NovaAnalise() {
   const [auditoriaMotivo, setAuditoriaMotivo] = useState("");
   const [auditoriaErro, setAuditoriaErro] = useState("");
 
-  const { data: verificacaoHoje } = trpc.analises.verificarHoje.useQuery(
-    { idCliente, dataAnalise },
-    { enabled: idCliente.length > 0 && dataAnalise.length > 0 }
+  // Cronômetro automático usando hook customizado
+  const timer = useTimer({ autoStart: false });
+  const alertaDuplicadoRef = useRef<string | null>(null);
+
+  // Validação de duplicidade: verifica se já existe análise do mesmo tipo na mesma data
+  // Revalida automaticamente quando ID, data ou tipo de análise muda
+  const { data: verificacaoHoje, refetch: refetchVerificacao } = trpc.analises.verificarHoje.useQuery(
+    { idCliente, dataAnalise, tipoAnalise },
+    { 
+      enabled: idCliente.length > 0 && dataAnalise.length > 0 && !loading && !!user,
+      // Revalidar sempre que os parâmetros mudarem
+      refetchOnMount: true,
+      refetchOnWindowFocus: false
+    }
   );
   const { data: auditoriaStatus } = trpc.auditorias.status.useQuery(
     { idCliente },
-    { enabled: idCliente.length > 0 }
+    { enabled: idCliente.length > 0 && !loading && !!user }
   );
-  const alertaDuplicadoRef = useRef<string | null>(null);
-
-  // Cronômetro automático (inicia ao inserir ID)
-  const [tempoSegundos, setTempoSegundos] = useState(0);
-  const [cronometroAtivo, setCronometroAtivo] = useState(false); // Inicia ao inserir ID
+  const { data: fraudeStatus } = trpc.fraudes.status.useQuery(
+    { idCliente },
+    { enabled: idCliente.length > 0 && !loading && !!user }
+  );
 
   // Fetch última análise
   const { data: ultimaAnalise } = trpc.analises.getUltimo.useQuery(
     { idCliente },
-    { enabled: idCliente.length > 0 }
+    { enabled: idCliente.length > 0 && !loading && !!user }
+  );
+
+  // Buscar data de criação da conta quando ID for inserido (sempre, mesmo se duplicado)
+  const { data: dataCriacaoContaBuscada } = trpc.analises.getDataCriacaoConta.useQuery(
+    { idCliente },
+    { 
+      enabled: idCliente.length > 0 && !loading && !!user,
+      // Sempre buscar, mesmo quando duplicado, para mostrar a informação
+      refetchOnMount: true,
+      refetchOnWindowFocus: false
+    }
   );
 
   const analiseDoDia = verificacaoHoje?.analise ?? null;
-  const dataAnaliseBloqueada = analiseDoDia
-    ? (analiseDoDia.auditoriaData ?? analiseDoDia.dataAnalise ?? null)
-    : null;
-  const dataAnaliseBloqueadaFormatada = dataAnaliseBloqueada
-    ? new Date(dataAnaliseBloqueada as string | number | Date).toLocaleString()
-    : "";
   const clienteAuditorado = auditoriaStatus?.temAuditoria ?? false;
   const ultimaAuditoria = auditoriaStatus?.ultima ?? null;
+  const clienteComFraude = fraudeStatus?.temFraude ?? false;
+  
+  // Campos desabilitados quando:
+  // - Não há ID do cliente
+  // - Há análise duplicada do mesmo tipo na mesma data
   const camposDesabilitados = !idCliente || isDuplicado;
 
+  // Iniciar timer automaticamente quando ID do cliente for informado
   useEffect(() => {
-    if (!idCliente) {
+    if (idCliente.length > 0 && dataAnalise && !isDuplicado) {
+      // Iniciar timer automaticamente se não estiver ativo e não houver duplicidade
+      if (!timer.ativo) {
+        timer.reiniciar();
+      }
+    } else if (!idCliente || isDuplicado) {
+      // Pausar timer se não houver ID ou se houver duplicidade
+      timer.pausar();
+    }
+  }, [idCliente, dataAnalise, isDuplicado, timer]);
+
+  // Validação rigorosa: verificar duplicidade do mesmo tipo na mesma data
+  useEffect(() => {
+    if (!idCliente || !dataAnalise) {
       setIsDuplicado(false);
       alertaDuplicadoRef.current = null;
+      timer.pausar();
       return;
     }
 
-    if (verificacaoHoje?.duplicado) {
+    // Verificar se há análise do mesmo tipo na data informada
+    if (verificacaoHoje?.duplicado && verificacaoHoje?.analise) {
       setIsDuplicado(true);
-      setCronometroAtivo(false);
-      if (alertaDuplicadoRef.current !== `${idCliente}-${dataAnalise}`) {
-        toast.error("Cliente já foi analisado nesta data.");
-        alertaDuplicadoRef.current = `${idCliente}-${dataAnalise}`;
+      timer.pausar();
+      
+      const keyAlerta = `${idCliente}-${dataAnalise}-${tipoAnalise}`;
+      if (alertaDuplicadoRef.current !== keyAlerta) {
+        toast.error(
+          "Este usuário já foi analisado na data de hoje.",
+          { duration: 6000 }
+        );
+        alertaDuplicadoRef.current = keyAlerta;
       }
     } else {
       setIsDuplicado(false);
       alertaDuplicadoRef.current = null;
     }
-  }, [verificacaoHoje, idCliente, dataAnalise]);
+  }, [verificacaoHoje, idCliente, dataAnalise, tipoAnalise, analiseDoDia, timer]);
 
-  // Auto-preencher com última análise
+  // Função auxiliar para limpar todos os campos do formulário (exceto ID do cliente e data de análise)
+  const limparCamposFormulario = () => {
+    setNomeCompleto("");
+    setDataCriacaoConta("");
+    setHorarioSaque("");
+    setValorSaque("");
+    setMetricasSaque([]);
+    setCategoriasSaque([]);
+    setJogoEsporteSaque("");
+    setValorDeposito("");
+    setCategoriasDeposito([]);
+    setJogoEsporteDepositoApos("");
+    setFinanceiro("");
+    setObservacao("");
+    setAuditoriaMarcada(false);
+    setAuditoriaTipo("");
+    setAuditoriaMotivo("");
+    setAuditoriaErro("");
+    timer.resetar();
+  };
+
+  // Auto-preencher apenas nome e data de criação quando ID existente é informado
+  // IMPORTANTE: Não preenche nenhum dado de análises antigas, apenas nome e data de criação da conta
   useEffect(() => {
-    if (isDuplicado) {
+    if (!idCliente) {
+      setNomeCompleto("");
+      setDataCriacaoConta("");
       return;
     }
 
-    if (ultimaAnalise) {
+    // Preencher apenas o nome do cliente (sem dados de análises antigas)
+    if (ultimaAnalise && !isDuplicado) {
+      // Buscar nome do cliente, mas não preencher outros campos de análise
       setNomeCompleto(ultimaAnalise.nomeCompleto || "");
-      setDataCriacaoConta(ultimaAnalise.dataCriacaoConta?.toString().split("T")[0] || "");
-      
-      if (ultimaAnalise.tipoAnalise === "SAQUE") {
-        setTipoAnalise("SAQUE");
-        setValorSaque(ultimaAnalise.valorSaque?.toString() || "");
-        setMetricaSaque(ultimaAnalise.metricaSaque || "");
-        setCategoriaSaque(ultimaAnalise.categoriaSaque || "");
-        setJogoEsporteSaque(ultimaAnalise.jogoEsporteSaque || "");
-      } else if (ultimaAnalise.tipoAnalise === "DEPOSITO") {
-        setTipoAnalise("DEPOSITO");
-        setValorDeposito(ultimaAnalise.valorDeposito?.toString() || "");
-        setCategoriaDeposito(ultimaAnalise.categoriaDeposito || "");
-        setJogoEsporteDepositoApos(ultimaAnalise.jogoEsporteDepositoApos || "");
-      }
-      
-      setObservacao(ultimaAnalise.observacao || "");
-    } else if (ultimaAnalise === null) {
-      setNomeCompleto("");
-      setDataCriacaoConta("");
-      setHorarioSaque("");
-      setValorSaque("");
-      setMetricaSaque("");
-      setCategoriaSaque("");
-      setJogoEsporteSaque("");
-      setValorDeposito("");
-      setCategoriaDeposito("");
-      setJogoEsporteDepositoApos("");
-      setFinanceiro("");
-      setObservacao("");
     }
-  }, [ultimaAnalise, isDuplicado]);
 
+    // Sempre buscar e preencher apenas a data de criação da conta do banco quando ID for inserido
+    // Esta é a única informação adicional que preenchemos automaticamente
+    if (dataCriacaoContaBuscada) {
+      try {
+        const dataFormatada = paraISOStringBrasilia(dataCriacaoContaBuscada);
+        if (dataFormatada && dataFormatada !== "Invalid Date") {
+          setDataCriacaoConta(dataFormatada);
+        }
+      } catch (error) {
+        console.error("Erro ao formatar data de criação da conta buscada:", error);
+        setDataCriacaoConta("");
+      }
+    } else {
+      // Se não encontrou nenhuma data no banco, deixar campo vazio
+      setDataCriacaoConta("");
+    }
+  }, [ultimaAnalise, dataCriacaoContaBuscada, idCliente, isDuplicado]);
+
+  // Limpar campos quando ID do cliente é removido
   useEffect(() => {
     if (idCliente.length === 0) {
       setNomeCompleto("");
       setDataCriacaoConta("");
       setHorarioSaque("");
       setValorSaque("");
-      setMetricaSaque("");
-      setCategoriaSaque("");
+      setMetricasSaque([]);
+      setCategoriasSaque([]);
       setJogoEsporteSaque("");
       setValorDeposito("");
-      setCategoriaDeposito("");
+      setCategoriasDeposito([]);
       setJogoEsporteDepositoApos("");
       setFinanceiro("");
       setObservacao("");
-      setTipoAnalise("SAQUE");
+      // Não resetar tipoAnalise - manter o tipo selecionado (SAQUE ou DEPOSITO)
       setAuditoriaMarcada(false);
       setAuditoriaTipo("");
       setAuditoriaMotivo("");
@@ -198,44 +238,42 @@ export default function NovaAnalise() {
     }
   }, [idCliente]);
 
-  // Iniciar cronômetro ao inserir ID do cliente
+  // Limpar campos específicos do tipo quando o tipo de análise mudar
   useEffect(() => {
-    if (idCliente.length > 0 && !isDuplicado) {
-      setCronometroAtivo(true);
-      setTempoSegundos(0);
+    // Resetar estado de duplicado ao trocar tipo para revalidar
+    setIsDuplicado(false);
+    
+    if (tipoAnalise === "SAQUE") {
+      // Limpar campos de depósito
+      setValorDeposito("");
+      setCategoriasDeposito([]);
+      setJogoEsporteDepositoApos("");
     } else {
-      setCronometroAtivo(false);
+      // Limpar campos de saque
+      setHorarioSaque("");
+      setValorSaque("");
+      setMetricasSaque([]);
+      setCategoriasSaque([]);
+      setJogoEsporteSaque("");
     }
-  }, [idCliente, isDuplicado]);
-
-  // Cronômetro automático que inicia ao inserir ID
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (cronometroAtivo) {
-      interval = setInterval(() => {
-        setTempoSegundos(prev => prev + 1);
-      }, 1000);
+    // Sempre limpar financeiro ao trocar tipo (será recalculado)
+    setFinanceiro("");
+    
+    // Revalidar duplicidade quando tipo mudar
+    if (idCliente && dataAnalise) {
+      refetchVerificacao();
     }
-    return () => clearInterval(interval);
-  }, [cronometroAtivo]);
+  }, [tipoAnalise, idCliente, dataAnalise, refetchVerificacao]);
 
-  // Função para formatar tempo
-  const formatarTempo = (segundos: number) => {
-    const horas = Math.floor(segundos / 3600);
-    const minutos = Math.floor((segundos % 3600) / 60);
-    const segs = segundos % 60;
-    if (horas > 0) {
-      return `${horas}h ${minutos}m ${segs}s`;
-    }
-    return `${minutos}m ${segs}s`;
-  };
+  // O timer é controlado no useEffect de validação de duplicidade
+  // Não precisa de useEffect separado aqui
 
-  // Criar análise
+  // Todos os hooks (incluindo useMutation) devem estar antes do return condicional
   const criarMutation = trpc.analises.criar.useMutation({
     onError: (error) => {
       if (error.message.includes("duplicado") || error.message.includes("ja analisado")) {
         setIsDuplicado(true);
-        toast.error("⚠️ Este ID já foi analisado hoje. Não é possível criar uma nova análise para o mesmo cliente no mesmo dia.", {
+        toast.error("Este usuário já foi analisado na data de hoje.", {
           duration: 5000,
         });
       } else {
@@ -244,11 +282,17 @@ export default function NovaAnalise() {
     },
   });
 
-  // Finalizar análise
   const finalizarMutation = trpc.analises.finalizar.useMutation({
     onSuccess: () => {
-      toast.success("Análise finalizada e aprovada");
-      navigate("/");
+      // Toast mais detalhado já foi exibido ao criar a análise
+      // Este toast confirma a finalização
+      toast.success("✅ Análise finalizada e aprovada com sucesso!", {
+        duration: 3000
+      });
+      // Limpar campos do formulário e manter usuário na mesma tela para nova análise
+      setIdCliente("");
+      limparCamposFormulario();
+      setDataAnalise(getDataHojeBrasilia());
     },
     onError: () => {
       toast.error("Erro ao finalizar análise");
@@ -256,10 +300,17 @@ export default function NovaAnalise() {
   });
 
   const registrarAuditoriaMutation = trpc.auditorias.registrar.useMutation({
-    onError: () => {
-      toast.error("Erro ao registrar auditoria");
+    onError: (error) => {
+      toast.error(`Erro ao registrar auditoria: ${error.message || "Erro desconhecido"}`, {
+        duration: 5000
+      });
     },
   });
+
+  // Return condicional deve vir DEPOIS de todos os hooks
+  if (loading || !user) {
+    return <LoadingState />;
+  }
 
   const handleFinalizar = async () => {
     const idClienteTrimmed = idCliente.trim();
@@ -277,18 +328,13 @@ export default function NovaAnalise() {
       return;
     }
 
-    if (!observacaoTrimmed) {
-      toast.error("Descreva a observação da análise");
-      return;
-    }
-
     if (!financeiroTrimmed) {
       toast.error("Informe o financeiro da análise");
       return;
     }
 
     if (isDuplicado) {
-      toast.error("⚠️ Este ID já foi analisado hoje. Não é possível finalizar uma análise duplicada.", {
+      toast.error("Este usuário já foi analisado na data de hoje.", {
         duration: 5000,
       });
       return;
@@ -315,8 +361,6 @@ export default function NovaAnalise() {
 
     if (tipoAnalise === "SAQUE") {
       const horarioTrimmed = horarioSaque.trim();
-      const metricaTrimmed = metricaSaque.trim();
-      const categoriaTrimmed = categoriaSaque.trim();
       const jogoTrimmed = jogoEsporteSaque.trim();
       const valorSaqueNumber = valorSaque ? parseFloat(valorSaque) : NaN;
 
@@ -330,13 +374,13 @@ export default function NovaAnalise() {
         return;
       }
 
-      if (!metricaTrimmed) {
-        toast.error("Selecione a métrica do saque");
+      if (metricasSaque.length === 0) {
+        toast.error("Selecione pelo menos uma métrica do saque");
         return;
       }
 
-      if (!categoriaTrimmed) {
-        toast.error("Selecione a categoria do saque");
+      if (categoriasSaque.length === 0) {
+        toast.error("Selecione pelo menos uma categoria do saque");
         return;
       }
 
@@ -345,7 +389,6 @@ export default function NovaAnalise() {
         return;
       }
     } else {
-      const categoriaDepositoTrimmed = categoriaDeposito.trim();
       const jogoDepositoTrimmed = jogoEsporteDepositoApos.trim();
       const valorDepositoNumber = valorDeposito ? parseFloat(valorDeposito) : NaN;
 
@@ -354,8 +397,8 @@ export default function NovaAnalise() {
         return;
       }
 
-      if (!categoriaDepositoTrimmed) {
-        toast.error("Selecione a categoria do depósito");
+      if (categoriasDeposito.length === 0) {
+        toast.error("Selecione pelo menos uma categoria do depósito");
         return;
       }
 
@@ -371,7 +414,8 @@ export default function NovaAnalise() {
         idCliente: idClienteTrimmed,
         dataAnalise,
         nomeCompleto: nomeTrimmed,
-        dataCriacaoConta: dataCriacaoConta ? new Date(dataCriacaoConta) : undefined,
+        // Enviar dataCriacaoConta como string (YYYY-MM-DD) diretamente, não como Date object
+        dataCriacaoConta: dataCriacaoConta || undefined,
         tipoAnalise,
         horarioSaque: tipoAnalise === "SAQUE" ? horarioSaque.trim() : undefined,
         valorSaque:
@@ -379,9 +423,13 @@ export default function NovaAnalise() {
             ? parseFloat(valorSaque)
             : undefined,
         metricaSaque:
-          tipoAnalise === "SAQUE" ? metricaSaque.trim() : undefined,
+          tipoAnalise === "SAQUE" && metricasSaque.length > 0
+            ? metricasSaque.join(", ")
+            : undefined,
         categoriaSaque:
-          tipoAnalise === "SAQUE" ? categoriaSaque.trim() : undefined,
+          tipoAnalise === "SAQUE" && categoriasSaque.length > 0
+            ? categoriasSaque.join(", ")
+            : undefined,
         jogoEsporteSaque:
           tipoAnalise === "SAQUE" ? jogoEsporteSaque.trim() : undefined,
         valorDeposito:
@@ -389,26 +437,43 @@ export default function NovaAnalise() {
             ? parseFloat(valorDeposito)
             : undefined,
         categoriaDeposito:
-          tipoAnalise === "DEPOSITO" ? categoriaDeposito.trim() : undefined,
+          tipoAnalise === "DEPOSITO" && categoriasDeposito.length > 0
+            ? categoriasDeposito.join(", ")
+            : undefined,
         jogoEsporteDepositoApos:
           tipoAnalise === "DEPOSITO"
             ? jogoEsporteDepositoApos.trim()
             : undefined,
         financeiro: financeiroNumber,
-        observacao: observacaoTrimmed,
-        tempoAnaliseSegundos: tempoSegundos,
+        // ganhoPerda não é enviado do frontend - campo opcional no banco
+        observacao: observacaoTrimmed || undefined,
+        tempoAnaliseSegundos: timer.segundos,
       });
       
+      // Toast informativo específico por tipo de análise
+      const tipoTexto = tipoAnalise === "SAQUE" ? "SAQUE" : "DEPÓSITO";
+      
+      toast.success(
+        `✅ Análise de ${tipoTexto} registrada com sucesso!\n` +
+        `Cliente: ${idClienteTrimmed}\n` +
+        `Tempo: ${Math.floor(timer.segundos / 60)}m ${timer.segundos % 60}s`,
+        { duration: 5000 }
+      );
+      
       // Resetar cronômetro após sucesso
-      setCronometroAtivo(false);
-      setTempoSegundos(0);
+      timer.resetar();
 
       if (auditoriaMarcada) {
         await registrarAuditoriaMutation.mutateAsync({
           idCliente,
           motivo: auditoriaMotivo.trim(),
-          tipo: auditoriaTipo as "ESPORTIVO" | "CASSINO",
+          tipo: auditoriaTipo as TipoAuditoria,
         });
+        toast.success(
+          `✅ Auditoria registrada para cliente ${idClienteTrimmed}\n` +
+          `Tipo: ${auditoriaTipo}`,
+          { duration: 4000 }
+        );
       }
 
       await finalizarMutation.mutateAsync({
@@ -464,144 +529,41 @@ export default function NovaAnalise() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">
       <div className="container max-w-3xl">
-        {/* Header com botão voltar */}
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-gradient">Nova Análise</h1>
-          <Button
-            variant="outline"
-            onClick={() => navigate("/")}
-            className="flex items-center gap-2"
-          >
-            <ArrowLeft size={16} />
-            Voltar
-          </Button>
-        </div>
+        <PageHeader
+          title="Nova Análise"
+          backUrl="/"
+          backLabel={
+            <>
+              <ArrowLeft size={16} className="text-white" />
+              Voltar
+            </>
+          }
+        />
 
-        {isDuplicado && (
-          <Card className="glass-card p-5 mb-6 border-destructive/50 bg-destructive/10 animate-fade-in">
-            <div className="flex gap-4">
-              <div className="flex-shrink-0">
-                <div className="p-2 rounded-lg bg-destructive/20">
-                  <AlertCircle className="text-destructive" size={24} />
-                </div>
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-destructive text-lg mb-2">⚠️ Este ID já foi analisado hoje</h3>
-                <p className="text-sm text-destructive/90 mb-2">
-                  O cliente <strong className="font-semibold">{idCliente}</strong> já possui uma análise registrada para a data <strong className="font-semibold">{new Date(dataAnalise).toLocaleDateString('pt-BR')}</strong>.
-                </p>
-                <p className="text-sm text-destructive/80 mb-2">
-                  Não é possível criar uma nova análise para o mesmo cliente no mesmo dia.
-                </p>
-                {dataAnaliseBloqueadaFormatada && (
-                  <div className="mt-3 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
-                    <p className="text-xs text-destructive/70 font-medium mb-1">Informações da análise existente:</p>
-                    <p className="text-xs text-destructive/60">
-                      Registrada em: <span className="font-semibold">{dataAnaliseBloqueadaFormatada}</span>
-                    </p>
-                    {analiseDoDia?.nomeCompleto && (
-                      <p className="text-xs text-destructive/60 mt-1">
-                        Cliente: <span className="font-semibold">{analiseDoDia.nomeCompleto}</span>
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </Card>
+        {isDuplicado && verificacaoHoje?.analise && (
+          <DuplicadoAlert
+            idCliente={idCliente}
+            dataAnalise={dataAnalise}
+            tipoAnalise={tipoAnalise}
+          />
         )}
 
-        {/* Card do Cronômetro Automático */}
-        {idCliente && !isDuplicado && (
-          <Card className="glass-card p-6 mb-6 bg-gradient-to-r from-primary/10 via-secondary/10 to-accent/10 border-primary/30 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-gradient-to-br from-primary/20 to-secondary/20">
-                  <Clock className="text-primary" size={28} />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Tempo de Análise (Automático)</p>
-                  <p className="text-4xl font-bold text-gradient font-mono tracking-wider">{formatarTempo(tempoSegundos)}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs font-medium text-green-400">Em andamento</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        )}
+        <TimerCard segundos={timer.segundos} ativo={timer.ativo && !isDuplicado} />
 
         <Card className="glass-card p-8">
           <div className="space-y-6">
-            {/* Seleção de Tipo de Análise */}
-            <div>
-              <Label className="text-foreground mb-4 block text-base font-semibold">Tipo de Análise *</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setTipoAnalise("SAQUE")}
-                  className={`p-5 rounded-xl border-2 transition-all duration-300 text-left group ${
-                    tipoAnalise === "SAQUE"
-                      ? "border-primary bg-gradient-to-br from-primary/20 to-primary/10 shadow-lg shadow-primary/10"
-                      : "border-border/50 bg-background/30 hover:border-primary/50 hover:bg-background/50"
-                  } disabled:opacity-60 disabled:cursor-not-allowed`}
-                  disabled={camposDesabilitados}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <div className={`font-bold text-lg mb-1 ${tipoAnalise === "SAQUE" ? "text-primary" : "text-foreground"}`}>
-                        Análise de Saque
-                      </div>
-                      <div className="text-sm text-muted-foreground">Registre saques do cliente</div>
-                    </div>
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                      tipoAnalise === "SAQUE" 
-                        ? "border-primary bg-primary" 
-                        : "border-border/50 group-hover:border-primary/50"
-                    }`}>
-                      {tipoAnalise === "SAQUE" && (
-                        <svg className="w-4 h-4 text-primary-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTipoAnalise("DEPOSITO")}
-                  className={`p-5 rounded-xl border-2 transition-all duration-300 text-left group ${
-                    tipoAnalise === "DEPOSITO"
-                      ? "border-primary bg-gradient-to-br from-primary/20 to-primary/10 shadow-lg shadow-primary/10"
-                      : "border-border/50 bg-background/30 hover:border-primary/50 hover:bg-background/50"
-                  } disabled:opacity-60 disabled:cursor-not-allowed`}
-                  disabled={camposDesabilitados}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <div className={`font-bold text-lg mb-1 ${tipoAnalise === "DEPOSITO" ? "text-primary" : "text-foreground"}`}>
-                        Análise de Depósito
-                      </div>
-                      <div className="text-sm text-muted-foreground">Registre depósitos do cliente</div>
-                    </div>
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                      tipoAnalise === "DEPOSITO" 
-                        ? "border-primary bg-primary" 
-                        : "border-border/50 group-hover:border-primary/50"
-                    }`}>
-                      {tipoAnalise === "DEPOSITO" && (
-                        <svg className="w-4 h-4 text-primary-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              </div>
-            </div>
+            <TipoAnaliseSelector 
+              tipo={tipoAnalise} 
+              onChange={(novoTipo) => {
+                setTipoAnalise(novoTipo);
+                // Resetar estado de duplicado ao mudar tipo para revalidar
+                setIsDuplicado(false);
+                // Revalidar duplicidade quando tipo mudar (se ID e data estiverem preenchidos)
+                if (idCliente && dataAnalise) {
+                  setTimeout(() => refetchVerificacao(), 100);
+                }
+              }} 
+            />
 
             {/* Campos Comuns */}
             <div className="border-t border-border pt-6">
@@ -613,23 +575,39 @@ export default function NovaAnalise() {
                     <Label htmlFor="idCliente" className="text-foreground">
                       ID do Cliente *
                     </Label>
-                    {isDuplicado && (
-                      <span className="flex items-center gap-1 text-xs font-semibold text-destructive">
-                        <AlertCircle size={14} />
-                        Já analisado hoje
-                      </span>
-                    )}
-                    {(clienteAuditorado || auditoriaMarcada) && !isDuplicado && (
-                      <Badge variant="outline" className="border-amber-500 text-amber-200 bg-amber-500/10 flex items-center gap-1 text-[11px] font-medium">
-                        <span className="text-lg leading-none">⚠️</span>
-                        Auditorado
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isDuplicado && verificacaoHoje?.analise && (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-destructive bg-destructive/10 px-2 py-1 rounded border border-destructive/30">
+                          <AlertCircle size={14} className="text-destructive" />
+                          Já analisado hoje
+                        </span>
+                      )}
+                      {(clienteAuditorado || auditoriaMarcada) && (
+                        <Badge variant="outline" className="border-amber-500 text-amber-200 bg-amber-500/20 flex items-center gap-1 text-[11px] font-semibold px-2 py-1">
+                          <span className="text-lg leading-none">⚠️</span>
+                          Auditorado
+                        </Badge>
+                      )}
+                      {clienteComFraude && (
+                        <Badge variant="outline" className="border-red-500 text-red-200 bg-red-500/20 flex items-center gap-1 text-[11px] font-semibold px-2 py-1">
+                          <AlertCircle size={14} className="text-red-400" />
+                          Fraude Reportada
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <Input
                     id="idCliente"
                     value={idCliente}
-                    onChange={(e) => setIdCliente(e.target.value)}
+                    onChange={(e) => {
+                      setIdCliente(e.target.value);
+                      // Resetar estado de duplicado ao mudar ID para revalidar
+                      setIsDuplicado(false);
+                      // Revalidar duplicidade quando ID mudar (se data e tipo estiverem preenchidos)
+                      if (e.target.value && dataAnalise) {
+                        setTimeout(() => refetchVerificacao(), 100);
+                      }
+                    }}
                     placeholder="Digite o ID"
                     className="mt-2 bg-input border-border text-foreground"
                   />
@@ -642,7 +620,7 @@ export default function NovaAnalise() {
                     id="nomeCompleto"
                     value={nomeCompleto}
                     onChange={(e) => setNomeCompleto(e.target.value)}
-                    placeholder="Nome completo do cliente"
+                    placeholder="Usuário"
                     className="mt-2 bg-input border-border text-foreground"
                     disabled={camposDesabilitados}
                   />
@@ -671,9 +649,17 @@ export default function NovaAnalise() {
                     id="dataAnalise"
                     type="date"
                     value={dataAnalise}
-                    onChange={(e) => setDataAnalise(e.target.value)}
+                    onChange={(e) => {
+                      setDataAnalise(e.target.value);
+                      // Resetar estado de duplicado ao mudar data para revalidar
+                      setIsDuplicado(false);
+                      // Revalidar duplicidade quando data mudar (se ID estiver preenchido)
+                      if (idCliente && e.target.value) {
+                        setTimeout(() => refetchVerificacao(), 100);
+                      }
+                    }}
                     className="mt-2 bg-input border-border text-foreground"
-                    disabled={!idCliente}
+                    disabled={!idCliente || isDuplicado}
                   />
                 </div>
               </div>
@@ -717,44 +703,26 @@ export default function NovaAnalise() {
                 </div>
 
                 <div className="mb-4">
-                  <Label htmlFor="metricaSaque" className="text-foreground">
-                    Métrica
-                  </Label>
-                  <select
-                    id="metricaSaque"
-                    value={metricaSaque}
-                    onChange={(e) => setMetricaSaque(e.target.value)}
-                    className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
+                  <MultiSelect
+                    options={METRICAS_SAQUE}
+                    selected={metricasSaque}
+                    onChange={setMetricasSaque}
+                    label="Métricas *"
+                    placeholder="Selecione uma ou mais métricas..."
                     disabled={camposDesabilitados}
-                  >
-                    <option value="">Selecione uma métrica...</option>
-                    {METRICAS_SAQUE.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="categoriaSaque" className="text-foreground">
-                      Categoria
-                    </Label>
-                    <select
-                      id="categoriaSaque"
-                      value={categoriaSaque}
-                      onChange={(e) => setCategoriaSaque(e.target.value)}
-                      className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
-                    disabled={camposDesabilitados}
-                    >
-                      <option value="">Selecione...</option>
-                      {CATEGORIAS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+                    <MultiSelect
+                      options={CATEGORIAS}
+                      selected={categoriasSaque}
+                      onChange={setCategoriasSaque}
+                      label="Categorias *"
+                      placeholder="Selecione uma ou mais categorias..."
+                      disabled={camposDesabilitados}
+                    />
                   </div>
                   <div>
                     <Label htmlFor="jogoEsporteSaque" className="text-foreground">
@@ -764,7 +732,7 @@ export default function NovaAnalise() {
                       id="jogoEsporteSaque"
                       value={jogoEsporteSaque}
                       onChange={(e) => setJogoEsporteSaque(e.target.value)}
-                      placeholder="Ex: Futebol, Slots"
+                      placeholder="Ex: Futebol, Aviator"
                       className="mt-2 bg-input border-border text-foreground"
                     disabled={camposDesabilitados}
                     />
@@ -811,23 +779,14 @@ export default function NovaAnalise() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="categoriaDeposito" className="text-foreground">
-                      Categoria
-                    </Label>
-                    <select
-                      id="categoriaDeposito"
-                      value={categoriaDeposito}
-                      onChange={(e) => setCategoriaDeposito(e.target.value)}
-                      className="mt-2 w-full px-3 py-2 bg-input border border-border rounded-md text-foreground"
+                    <MultiSelect
+                      options={CATEGORIAS}
+                      selected={categoriasDeposito}
+                      onChange={setCategoriasDeposito}
+                      label="Categorias *"
+                      placeholder="Selecione uma ou mais categorias..."
                       disabled={camposDesabilitados}
-                    >
-                      <option value="">Selecione...</option>
-                      {CATEGORIAS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div>
                     <Label htmlFor="jogoEsporteDepositoApos" className="text-foreground">
@@ -864,7 +823,7 @@ export default function NovaAnalise() {
             {/* Observação */}
             <div className="border-t border-border pt-6">
               <Label htmlFor="observacao" className="text-foreground">
-                Observação (máx. 1000 caracteres)
+                Observação <span className="text-muted-foreground text-xs">(opcional, máx. 1000 caracteres)</span>
               </Label>
               <Textarea
                 id="observacao"
@@ -941,7 +900,7 @@ export default function NovaAnalise() {
                     <p className="text-xs text-muted-foreground">
                       Registrada em{" "}
                       {ultimaAuditoria.criadoEm
-                        ? new Date(ultimaAuditoria.criadoEm as string | number | Date).toLocaleString("pt-BR")
+                        ? formatarDataHora(ultimaAuditoria.criadoEm)
                         : "-"}{" "}
                       por {ultimaAuditoria.nomeAnalista ?? "—"}
                     </p>
@@ -960,14 +919,12 @@ export default function NovaAnalise() {
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="animate-spin mr-2" size={16} />
+                    <Loader2 className="animate-spin mr-2 text-white" size={16} />
                     Finalizando...
                   </>
                 ) : (
                   <>
-                    <svg className="mr-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <Shield className="mr-2 text-white" size={16} />
                     Finalizar Análise (Aprovado)
                   </>
                 )}
@@ -979,7 +936,7 @@ export default function NovaAnalise() {
                 size="lg"
                 className="flex-1"
               >
-                <AlertCircle className="mr-2" size={16} />
+                <AlertCircle className="mr-2 text-white" size={16} />
                 Reportar Fraude
               </Button>
             </div>
@@ -1003,9 +960,9 @@ export default function NovaAnalise() {
               </Label>
               <RadioGroup
                 value={auditoriaTipo || undefined}
-                onValueChange={(value: "ESPORTIVO" | "CASSINO") => {
+                onValueChange={(value) => {
                   setAuditoriaErro("");
-                  setAuditoriaTipo(value);
+                  setAuditoriaTipo(value as TipoAuditoria);
                 }}
                 className="mt-3 grid grid-cols-2 gap-3"
               >
@@ -1054,7 +1011,7 @@ export default function NovaAnalise() {
 
             {auditoriaErro && (
               <div className="text-sm text-destructive flex items-center gap-2">
-                <AlertCircle size={16} className="text-destructive" />
+                <AlertCircle size={16} className="text-white" />
                 {auditoriaErro}
               </div>
             )}

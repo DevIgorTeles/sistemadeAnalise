@@ -1,51 +1,39 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
-import { Link } from "wouter";
-import { AlertCircle, Loader2, ShieldAlert, Users } from "lucide-react";
+import { ShieldAlert, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LoadingState } from "@/components/common/LoadingState";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageHeader } from "@/components/common/PageHeader";
+import { formatarDataHora } from "@/utils/formatters";
 
 export default function Auditorias() {
   const { user, loading } = useAuth({
     redirectOnUnauthenticated: true,
     redirectPath: "/login",
   });
-  const { data: auditorias, isLoading } = trpc.auditorias.listar.useQuery(undefined, {
+  const { data: auditorias, isLoading } = trpc.auditorias.listar.useQuery({}, {
     enabled: Boolean(user),
   });
 
   if (loading || !user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-[#131b28] py-8">
       <div className="container">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gradient flex items-center gap-3">
-              <ShieldAlert className="text-amber-400" size={28} />
-              Auditorias Registradas
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Visualize todas as análises marcadas para auditoria e revise os detalhes registrados.
-            </p>
-          </div>
-          <Link href="/">
-            <Button variant="outline">← Voltar</Button>
-          </Link>
-        </div>
+        <PageHeader
+          title="Auditorias Registradas"
+          description="Visualize todas as auditorias registradas pela equipe e revise os detalhes."
+          icon={ShieldAlert}
+          backUrl="/"
+        />
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-primary" size={40} />
-          </div>
+          <LoadingState className="min-h-[400px]" size={40} />
         ) : auditorias && auditorias.length > 0 ? (
           <div className="space-y-4">
             {auditorias.map((auditoria) => (
@@ -58,7 +46,7 @@ export default function Auditorias() {
                         Cliente: {auditoria.idCliente}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        {new Date(auditoria.criadoEm as string | number | Date).toLocaleString("pt-BR")}
+                        {formatarDataHora(auditoria.criadoEm)}
                       </p>
                     </div>
                   </div>
@@ -99,15 +87,10 @@ export default function Auditorias() {
             ))}
           </div>
         ) : (
-          <Card className="glass-card p-12 text-center">
-            <AlertCircle className="mx-auto text-muted-foreground mb-4" size={40} />
-            <h3 className="text-lg font-semibold text-foreground mb-2">
-              Nenhuma auditoria registrada
-            </h3>
-            <p className="text-muted-foreground">
-              Assim que auditorias forem marcadas nas análises, elas aparecerão aqui.
-            </p>
-          </Card>
+          <EmptyState
+            title="Nenhuma auditoria registrada"
+            description="Assim que auditorias forem marcadas nas análises, elas aparecerão aqui."
+          />
         )}
       </div>
     </div>
