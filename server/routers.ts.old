@@ -10,6 +10,7 @@ import {
   reportarFraude,
   listarFraudes,
   getFraudesPorCliente,
+  getFraudePorAnalise,
   registrarAuditoria,
   listarMetricasAnalises,
   upsertUser,
@@ -19,6 +20,7 @@ import {
   registrarAuditoriaAnalise,
   listarAuditorias,
   getStatusAuditoria,
+  getAuditoriaPorAnalise,
   getDataCriacaoConta
 } from "./db";
 import { TRPCError } from "@trpc/server";
@@ -85,6 +87,7 @@ const analiseBaseSchema = z.object({
   qtdApostas: z.number().int().min(0).optional(),
   retornoApostas: z.number().optional(),
   ganhoPerda: z.number().optional().nullable(),
+  auditoriaUsuario: z.boolean().optional(), // TRUE = auditoria marcada, FALSE = não marcada
 });
 
 // Schemas for validation
@@ -127,6 +130,8 @@ const analisesSchema = z.discriminatedUnion("tipoAnalise", [
 
 const fraudeSchema = z.object({
   idCliente: z.string().min(1),
+  dataAnalise: z.string().trim().min(1, "Data da análise obrigatória"),
+  descricaoDetalhada: z.string().trim().min(10, "Descrição detalhada obrigatória (mínimo 10 caracteres)"),
   motivoPadrao: z.string().min(1, "Motivo obrigatorio"),
   motivoLivre: z.string().optional(),
 });
@@ -229,6 +234,15 @@ export const appRouter = router({
     criar: protectedProcedure
       .input(analisesSchema)
       .mutation(async ({ input, ctx }) => {
+        // VALIDAÇÃO ADICIONAL: Garantir que auditoriaData não seja enviado
+        // Este campo só é preenchido pelo backend quando registrarAuditoriaAnalise é chamado
+        if ('auditoriaData' in input && (input as any).auditoriaData !== undefined) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "auditoriaData não pode ser enviado pelo frontend - é preenchido automaticamente quando auditoria é marcada",
+          });
+        }
+        
         // Check for duplicity
         const normalizedIdCliente = input.idCliente.trim();
         const dataAnaliseDate = toDate(input.dataAnalise);
@@ -281,6 +295,8 @@ export const appRouter = router({
         const fonteConsulta = input.fonteConsulta ? sanitizeString(input.fonteConsulta.trim()) : undefined;
 
         // Create analysis - sanitizar todos os campos de texto
+        // IMPORTANTE: auditoriaData NUNCA deve ser preenchido aqui
+        // Só será preenchido quando registrarAuditoriaAnalise for chamado explicitamente
         const analise = {
           idCliente: sanitizeIdentifier(normalizedIdCliente),
           nomeCompleto: sanitizeString(input.nomeCompleto.trim()),
@@ -338,9 +354,13 @@ export const appRouter = router({
               : undefined,
           observacao,
           fonteConsulta: fonteConsulta && fonteConsulta.length > 0 ? fonteConsulta : undefined,
-          auditoriaUsuario: ctx.user.id,
-          // auditoriaData só é preenchido quando a análise for marcada como auditoria
-          // Isso será feito posteriormente pela rota auditorias.registrar
+          // ID do analista que está criando a análise
+          analistaId: ctx.user?.id,
+          // REGRA DE NEGÓCIO: auditoriaUsuario é boolean
+          // TRUE = auditoria marcada (gravar auditoriaData com data atual)
+          // FALSE ou undefined = não marcada (auditoriaData = NULL)
+          auditoriaUsuario: input.auditoriaUsuario ?? false,
+          // auditoriaData será preenchido automaticamente no backend se auditoriaUsuario = TRUE
           auditoriaData: undefined,
         };
 
@@ -431,6 +451,21 @@ export const appRouter = router({
           });
         }
       }),
+
+    porAnalise: protectedProcedure
+      .input(z.object({ 
+        idCliente: z.string().min(1),
+        dataAnalise: z.string().min(1),
+        tipoAnalise: z.enum(["SAQUE", "DEPOSITO"]).optional(),
+      }))
+      .query(async ({ input }) => {
+        const auditoria = await getAuditoriaPorAnalise(
+          input.idCliente, 
+          input.dataAnalise,
+          input.tipoAnalise
+        );
+        return auditoria;
+      }),
   }),
 
   // Metricas procedures
@@ -456,6 +491,8 @@ export const appRouter = router({
         // Sanitizar campos de texto antes de salvar
         const fraude = {
           idCliente: sanitizeIdentifier(input.idCliente),
+          dataAnalise: input.dataAnalise, // Data da análise quando a fraude foi reportada
+          descricaoDetalhada: sanitizeString(input.descricaoDetalhada),
           motivoPadrao: sanitizeString(input.motivoPadrao),
           motivoLivre: input.motivoLivre ? sanitizeString(input.motivoLivre) : undefined,
           analistaId: ctx.user.id,
@@ -480,6 +517,16 @@ export const appRouter = router({
           temFraude: fraudesCliente.length > 0,
           fraudes: fraudesCliente,
         };
+      }),
+
+    porAnalise: protectedProcedure
+      .input(z.object({ 
+        idCliente: z.string().min(1),
+        dataAnalise: z.string().min(1),
+      }))
+      .query(async ({ input }) => {
+        const fraude = await getFraudePorAnalise(input.idCliente, input.dataAnalise);
+        return fraude;
       }),
 
     listar: protectedProcedure

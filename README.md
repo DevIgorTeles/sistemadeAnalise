@@ -28,12 +28,28 @@ cp .env.example .env
 CREATE DATABASE opa_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-2. **Executar migrations:**
+2. **Sincronizar schema com o banco de dados (Recomendado para desenvolvimento):**
 ```bash
-pnpm drizzle-kit push
+pnpm db:push
 ```
 
-3. **Inicializar banco com usuário admin:**
+Este comando sincroniza diretamente o schema com o banco de dados, sem precisar gerar migrations. É a forma mais simples e recomendada para desenvolvimento.
+
+**Alternativa - Usar migrations (para produção):**
+```bash
+# Gerar migrations a partir do schema
+pnpm db:generate
+
+# Aplicar migrations no banco de dados
+pnpm db:migrate
+```
+
+Ou fazer ambos de uma vez:
+```bash
+pnpm db:push-with-migrate
+```
+
+4. **Inicializar banco com usuário admin:**
 ```bash
 # Linux/Mac
 chmod +x scripts/reset_database.sh
@@ -46,6 +62,16 @@ chmod +x scripts/reset_database.sh
 Ou execute manualmente o SQL:
 ```bash
 mysql -u seu_usuario -p opa_system < scripts/init_database.sql
+```
+
+**Resumo rápido (criação do zero):**
+```bash
+# 1. Criar banco no MySQL (manual)
+# 2. Sincronizar schema com o banco
+pnpm db:push
+
+# 3. Inicializar com usuário admin
+pnpm zerar-banco
 ```
 
 ## 🔐 Credenciais do Administrador Inicial
@@ -148,6 +174,38 @@ O sistema utiliza tabelas separadas para diferentes tipos de análise:
 
 - [Migração para Tabelas Separadas](./MIGRACAO_TABELAS_SEPARADAS.md) - Detalhes sobre a estrutura de banco
 
+## 🔧 Comandos Úteis do Banco de Dados
+
+### Sincronizar schema (Recomendado)
+```bash
+pnpm db:push
+```
+Sincroniza diretamente o schema com o banco de dados. Ideal para desenvolvimento.
+
+### Gerar migrations
+```bash
+pnpm db:generate
+```
+Gera arquivos de migration SQL baseados nas alterações do schema em `drizzle/schema.ts`.
+
+### Aplicar migrations
+```bash
+pnpm db:migrate
+```
+Aplica as migrations geradas no banco de dados.
+
+### Gerar e aplicar migrations
+```bash
+pnpm db:push-with-migrate
+```
+Gera e aplica migrations automaticamente no banco de dados.
+
+### Zerar banco de dados
+```bash
+pnpm zerar-banco
+```
+Limpa todas as tabelas e recria o usuário administrador inicial.
+
 ## 🔧 Troubleshooting
 
 ### Erro de conexão com banco de dados
@@ -168,6 +226,28 @@ Verifique se:
 1. Certifique-se de que o MySQL client está instalado
 2. Verifique permissões do usuário MySQL
 3. Execute o SQL manualmente se necessário
+
+### Erro ao gerar migrations
+
+1. Verifique se o arquivo `drizzle.config.ts` está configurado corretamente
+2. Confirme que a `DATABASE_URL` está definida no `.env`
+3. Certifique-se de que o schema em `drizzle/schema.ts` está válido
+
+### Erro "Unknown table 'analises'" ao aplicar migrations
+
+Este erro ocorre quando há migrations antigas tentando remover a tabela `analises` que não existe. Soluções:
+
+**Solução 1 - Usar push direto (Recomendado):**
+```bash
+pnpm db:push
+```
+Isso sincroniza diretamente sem usar migrations antigas.
+
+**Solução 2 - Limpar migrations problemáticas:**
+1. Remova as migrations que tentam dropar `analises` da pasta `drizzle/`
+2. Remova os snapshots correspondentes de `drizzle/meta/`
+3. Atualize `drizzle/meta/_journal.json` removendo as entradas problemáticas
+4. Execute `pnpm db:push` novamente
 
 ## 📄 Licença
 

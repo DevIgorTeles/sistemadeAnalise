@@ -19,7 +19,8 @@ export default function Login() {
       const candidateSafe = candidate && candidate.startsWith("/") ? candidate : null;
       navigate(candidateSafe ?? "/", { replace: true });
     }
-  }, [auth.loading, auth.user, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.loading, auth.user]); // navigate é estável do wouter, não precisa estar nas dependências
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

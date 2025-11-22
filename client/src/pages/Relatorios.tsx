@@ -10,13 +10,62 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Clock } from "lucide-react";
+import { ArrowLeft, Download, BarChart3, PieChart, TrendingUp, Clock, AlertCircle, Shield } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
 import { LoadingState } from "@/components/common/LoadingState";
 import { formatarTempo, formatarMoeda, formatarData, formatarDataHora } from "@/utils/formatters";
+
+// Funções auxiliares para badges (fora do componente para serem reutilizáveis)
+const getTipoBadgeClass = (tipo: "SAQUE" | "DEPOSITO" | null | undefined) => {
+  if (tipo === "SAQUE") {
+    return "bg-sky-500/15 text-sky-300 border border-sky-500/20";
+  }
+  if (tipo === "DEPOSITO") {
+    return "bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/20";
+  }
+  return "bg-muted/15 text-muted-foreground border border-border/40";
+};
+
+const getValorBadgeClass = (valor: number) => {
+  if (valor >= 10_000) {
+    return "bg-rose-500/15 text-rose-300 border border-rose-500/30";
+  }
+  if (valor >= 1_000) {
+    return "bg-amber-500/15 text-amber-300 border border-amber-500/30";
+  }
+  if (valor <= 0) {
+    return "bg-slate-500/15 text-slate-300 border border-slate-500/30";
+  }
+  return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30";
+};
+
+const getTempoBadgeClass = (segundos: number) => {
+  if (segundos <= 60) {
+    return "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20";
+  }
+  if (segundos <= 180) {
+    return "bg-amber-500/10 text-amber-300 border border-amber-500/20";
+  }
+  return "bg-rose-500/10 text-rose-300 border border-rose-500/20";
+};
+
+const categoriaClasses: Record<string, string> = {
+  CASSINO: "bg-purple-500/15 text-purple-300 border border-purple-500/30",
+  SPORTBOOK: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
+  OUTROS: "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30",
+  "N/A": "bg-muted/15 text-muted-foreground border border-border/40",
+};
+
+const getCategoriaBadgeClass = (categoria?: string | null) => {
+  if (!categoria) {
+    return "bg-muted/15 text-muted-foreground border border-border/40";
+  }
+  const normalizada = categoria.toUpperCase();
+  return categoriaClasses[normalizada] || "bg-muted/15 text-muted-foreground border border-border/40";
+};
 
 export default function Relatorios() {
   const { user, loading } = useAuth({
@@ -36,6 +85,8 @@ export default function Relatorios() {
   const [idClienteFiltro, setIdClienteFiltro] = useState("");
   const [analiseSelecionada, setAnaliseSelecionada] = useState<any>(null);
   const [modalAberto, setModalAberto] = useState(false);
+  const [fraudeInfo, setFraudeInfo] = useState<any>(null);
+  const [auditoriaInfo, setAuditoriaInfo] = useState<any>(null);
   const [analisesVisiveis, setAnalisesVisiveis] = useState(10);
   const [usuariosVisiveis, setUsuariosVisiveis] = useState(10);
   const [tempoMedioUsuariosVisiveis, setTempoMedioUsuariosVisiveis] = useState(9);
@@ -64,48 +115,94 @@ export default function Relatorios() {
     }
   );
 
-  // Processar dados para gráficos
+  // REFATORADO: Processar dados para gráficos e métricas
   useEffect(() => {
-    if (analises && analises.length > 0) {
-      setAnalisesVisiveis(Math.min(10, analises.length));
-      const saques = analises.filter(a => a.tipoAnalise === "SAQUE").length;
-      const depositos = analises.filter(a => a.tipoAnalise === "DEPOSITO").length;
-      const tempoTotal = analises.reduce((sum, a) => sum + (a.tempoAnaliseSegundos || 0), 0);
-      const tempoMedio = analises.length > 0 ? Math.round(tempoTotal / analises.length) : 0;
-
-      // Análises por usuário
-      const analisesPorUsuario: Record<string, number> = {};
-      const temposPorUsuario: Record<string, { total: number; count: number }> = {};
-
-      analises.forEach(a => {
-        const userName = a.nomeCompleto || "Desconhecido";
-        analisesPorUsuario[userName] = (analisesPorUsuario[userName] || 0) + 1;
-        
-        if (!temposPorUsuario[userName]) {
-          temposPorUsuario[userName] = { total: 0, count: 0 };
-        }
-        temposPorUsuario[userName].total += a.tempoAnaliseSegundos || 0;
-        temposPorUsuario[userName].count += 1;
-      });
-
-      const tempoMedioPorUsuario: Record<string, number> = {};
-      Object.entries(temposPorUsuario).forEach(([user, data]) => {
-        tempoMedioPorUsuario[user] = Math.round(data.total / data.count);
-      });
-
+    if (!analises || analises.length === 0) {
+      // Resetar métricas quando não há dados
       setMetricas({
-        totalAnalises: analises.length,
-        totalSaques: saques,
-        totalDepositos: depositos,
-        tempoMedioSegundos: tempoMedio,
+        totalAnalises: 0,
+        totalSaques: 0,
+        totalDepositos: 0,
+        tempoMedioSegundos: 0,
         taxaFraude: 0,
-        analisesPorUsuario,
-        tempoMedioPorUsuario,
+        analisesPorUsuario: {},
+        tempoMedioPorUsuario: {},
       });
-      setUsuariosVisiveis(
-        Math.min(10, Object.keys(analisesPorUsuario).length)
-      );
+      setAnalisesVisiveis(10);
+      return;
     }
+
+    setAnalisesVisiveis(Math.min(10, analises.length));
+    
+    // Contar saques e depósitos
+    const saques = analises.filter(a => a.tipoAnalise === "SAQUE").length;
+    const depositos = analises.filter(a => a.tipoAnalise === "DEPOSITO").length;
+    
+    // Calcular tempo médio geral (todas as análises com tempo válido)
+    const analisesComTempo = analises.filter(a => {
+      const tempo = a.tempoAnaliseSegundos;
+      return tempo != null && tempo !== undefined && !Number.isNaN(Number(tempo)) && Number(tempo) > 0;
+    });
+    
+    const tempoTotal = analisesComTempo.reduce((sum, a) => {
+      const tempo = Number(a.tempoAnaliseSegundos) || 0;
+      return sum + tempo;
+    }, 0);
+    
+    const tempoMedio = analisesComTempo.length > 0 ? Math.round(tempoTotal / analisesComTempo.length) : 0;
+
+    // REFATORADO: Calcular análises e tempos por usuário
+    const analisesPorUsuario: Record<string, number> = {};
+    const temposPorUsuario: Record<string, { total: number; count: number }> = {};
+
+    analises.forEach(a => {
+      // Obter nome do analista de forma segura
+      const analistaNome = (a as any)?.analistaNome;
+      let userName = "Desconhecido";
+      
+      if (analistaNome) {
+        const nomeStr = String(analistaNome).trim();
+        if (nomeStr.length > 0) {
+          userName = nomeStr;
+        }
+      }
+      
+      // Contar análises por usuário
+      analisesPorUsuario[userName] = (analisesPorUsuario[userName] || 0) + 1;
+      
+      // Calcular tempos por usuário (apenas tempos válidos)
+      const tempo = a.tempoAnaliseSegundos;
+      if (tempo != null && tempo !== undefined) {
+        const tempoNum = Number(tempo);
+        if (!Number.isNaN(tempoNum) && tempoNum > 0) {
+          if (!temposPorUsuario[userName]) {
+            temposPorUsuario[userName] = { total: 0, count: 0 };
+          }
+          temposPorUsuario[userName].total += tempoNum;
+          temposPorUsuario[userName].count += 1;
+        }
+      }
+    });
+
+    // REFATORADO: Calcular tempo médio por usuário
+    const tempoMedioPorUsuario: Record<string, number> = {};
+    Object.entries(temposPorUsuario).forEach(([user, data]) => {
+      if (data.count > 0 && data.total > 0) {
+        tempoMedioPorUsuario[user] = Math.round(data.total / data.count);
+      }
+    });
+
+    setMetricas({
+      totalAnalises: analises.length,
+      totalSaques: saques,
+      totalDepositos: depositos,
+      tempoMedioSegundos: tempoMedio,
+      taxaFraude: 0,
+      analisesPorUsuario,
+      tempoMedioPorUsuario,
+    });
+    
+    setUsuariosVisiveis(Math.min(10, Object.keys(analisesPorUsuario).length));
   }, [analises]);
   const analisesLimitadas = useMemo(() => {
     if (!analises) return [];
@@ -165,55 +262,6 @@ export default function Relatorios() {
     a.click();
     window.URL.revokeObjectURL(url);
     toast.success("Relatório exportado com sucesso");
-  };
-
-
-const getTipoBadgeClass = (tipo: "SAQUE" | "DEPOSITO" | null | undefined) => {
-  if (tipo === "SAQUE") {
-    return "bg-sky-500/15 text-sky-300 border border-sky-500/20";
-  }
-  if (tipo === "DEPOSITO") {
-    return "bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/20";
-  }
-  return "bg-muted/20 text-muted-foreground border border-border/40";
-};
-
-const getValorBadgeClass = (valor: number) => {
-  if (valor >= 10_000) {
-    return "bg-rose-500/15 text-rose-300 border border-rose-500/30";
-  }
-  if (valor >= 1_000) {
-    return "bg-amber-500/15 text-amber-300 border border-amber-500/30";
-  }
-  if (valor <= 0) {
-    return "bg-slate-500/15 text-slate-300 border border-slate-500/30";
-  }
-  return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30";
-};
-
-const getTempoBadgeClass = (segundos: number) => {
-  if (segundos <= 60) {
-    return "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20";
-  }
-  if (segundos <= 180) {
-    return "bg-amber-500/10 text-amber-300 border border-amber-500/20";
-  }
-  return "bg-rose-500/10 text-rose-300 border border-rose-500/20";
-};
-
-const categoriaClasses: Record<string, string> = {
-  CASSINO: "bg-purple-500/15 text-purple-300 border border-purple-500/30",
-  SPORTBOOK: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
-  OUTROS: "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30",
-  "N/A": "bg-muted/15 text-muted-foreground border border-border/40",
-};
-
-  const getCategoriaBadgeClass = (categoria?: string | null) => {
-    if (!categoria) {
-      return "bg-muted/15 text-muted-foreground border border-border/40";
-    }
-    const normalizada = categoria.toUpperCase();
-    return categoriaClasses[normalizada] || "bg-muted/15 text-muted-foreground border border-border/40";
   };
 
   // Cores para gráficos
@@ -499,15 +547,21 @@ const categoriaClasses: Record<string, string> = {
               tempoMedioUsuariosLimitados.map(([usuario, tempo], idx) => {
                 // Key única usando nome do usuário e índice
                 const uniqueKey = `tempo-${usuario}-${idx}`;
+                // Garantir que tempo seja um número válido
+                const tempoValido = typeof tempo === 'number' && !Number.isNaN(tempo) && tempo >= 0 ? tempo : 0;
                 return (
                   <div key={uniqueKey} className="p-4 border border-border/50 rounded-lg hover:border-accent/50 transition-colors">
-                    <p className="text-sm text-muted-foreground mb-2 truncate">{usuario}</p>
-                    <p className="text-2xl font-bold text-accent">{formatarTempo(tempo)}</p>
+                    <p className="text-sm text-muted-foreground mb-2 truncate">{usuario || "Desconhecido"}</p>
+                    <p className="text-2xl font-bold text-accent">{formatarTempo(tempoValido)}</p>
                   </div>
                 );
               })
             ) : (
-              <p className="text-muted-foreground">Nenhum dado</p>
+              <p className="text-muted-foreground col-span-full text-center py-4">
+                {analises && analises.length > 0 
+                  ? "Nenhum tempo de análise registrado" 
+                  : "Nenhum dado disponível"}
+              </p>
             )}
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -553,43 +607,88 @@ const categoriaClasses: Record<string, string> = {
                     <th className="text-left py-3 px-4 text-muted-foreground">Valor</th>
                     <th className="text-left py-3 px-4 text-muted-foreground">Tempo</th>
                     <th className="text-left py-3 px-4 text-muted-foreground">Categoria</th>
+                    <th className="text-left py-3 px-4 text-muted-foreground">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {analisesLimitadas.map((analise, index) => {
-                    const valorNumerico = parseFloat(
-                      analise.tipoAnalise === "SAQUE"
-                        ? analise.valorSaque?.toString() || "0"
-                        : analise.valorDeposito?.toString() || "0"
-                    );
-                    const tempoSegundos = analise.tempoAnaliseSegundos || 0;
-                    const categoria =
-                      analise.tipoAnalise === "SAQUE"
-                        ? analise.categoriaSaque
-                        : analise.categoriaDeposito;
-                    const tipo =
-                      analise.tipoAnalise === "SAQUE"
-                        ? "SAQUE"
-                        : analise.tipoAnalise === "DEPOSITO"
-                        ? "DEPOSITO"
-                        : null;
+                    // REFATORADO: Processar dados de forma segura
+                    const idCliente = analise?.idCliente ? String(analise.idCliente) : "—";
+                    const nomeCompleto = analise?.nomeCompleto ? String(analise.nomeCompleto) : "—";
+                    const dataAnalise = analise?.dataAnalise ? formatarData(analise.dataAnalise) : "—";
+                    
+                    const valorNumerico = (() => {
+                      if (analise.tipoAnalise === "SAQUE") {
+                        const valor = analise.valorSaque;
+                        if (valor == null) return 0;
+                        const parsed = parseFloat(String(valor));
+                        return isNaN(parsed) ? 0 : parsed;
+                      } else {
+                        const valor = analise.valorDeposito;
+                        if (valor == null) return 0;
+                        const parsed = parseFloat(String(valor));
+                        return isNaN(parsed) ? 0 : parsed;
+                      }
+                    })();
+                    
+                    const tempoSegundos = (() => {
+                      const tempo = analise.tempoAnaliseSegundos;
+                      if (tempo == null || tempo === undefined) return 0;
+                      const parsed = Number(tempo);
+                      return isNaN(parsed) ? 0 : parsed;
+                    })();
+                    
+                    const categoria = analise.tipoAnalise === "SAQUE"
+                      ? analise.categoriaSaque
+                      : analise.categoriaDeposito;
+                    
+                    const tipo = analise.tipoAnalise === "SAQUE"
+                      ? "SAQUE"
+                      : analise.tipoAnalise === "DEPOSITO"
+                      ? "DEPOSITO"
+                      : null;
 
-                    // Key única combinando tipo e ID para evitar duplicatas entre saques e depositos
-                    const uniqueKey = `${analise.tipoAnalise || 'UNKNOWN'}-${analise.id}-${index}`;
+                    // Key única combinando tipo e ID
+                    const uniqueKey = `${analise.tipoAnalise || 'UNKNOWN'}-${analise.id || index}-${index}`;
 
                     return (
                       <tr 
                         key={uniqueKey} 
-                        className="border-b border-border/50 hover:bg-background/50 cursor-pointer transition-colors"
+                        className={`border-b border-border/50 hover:bg-background/50 cursor-pointer transition-colors ${
+                          analise.auditoriaData && (analise as any).temFraude
+                            ? 'bg-gradient-to-r from-amber-500/5 to-red-500/5 border-l-4 border-l-amber-500/50'
+                            : analise.auditoriaData
+                            ? 'bg-amber-500/5 border-l-4 border-l-amber-500/50'
+                            : (analise as any).temFraude
+                            ? 'bg-red-500/5 border-l-4 border-l-red-500/50'
+                            : ''
+                        }`}
                         onClick={() => {
-                          setAnaliseSelecionada(analise);
-                          setModalAberto(true);
+                          // Verificar se temos dados mínimos necessários
+                          // ID pode ser 0 em alguns casos, então verificamos se tipoAnalise existe
+                          if (analise.tipoAnalise && (analise.id !== undefined && analise.id !== null)) {
+                            setAnaliseSelecionada(analise);
+                            setModalAberto(true);
+                            setFraudeInfo(null);
+                            setAuditoriaInfo(null);
+                          } else {
+                            console.error('[Relatorios] Erro: análise sem ID ou tipo:', {
+                              id: analise.id,
+                              tipoAnalise: analise.tipoAnalise,
+                              analise: analise
+                            });
+                            toast.error("Erro ao abrir detalhes: dados incompletos");
+                          }
                         }}
                       >
-                        <td className="py-3 px-4 text-foreground">{analise.idCliente}</td>
-                        <td className="py-3 px-4 text-foreground">{analise.nomeCompleto || "—"}</td>
+                        <td className="py-3 px-4 text-foreground font-medium">
+                          {idCliente}
+                        </td>
+                        <td className="py-3 px-4 text-foreground">
+                          {nomeCompleto}
+                        </td>
                         <td className="py-3 px-4 text-muted-foreground">
-                          {formatarData(analise.dataAnalise)}
+                          {dataAnalise}
                         </td>
                         <td className="py-3 px-4">
                           <span
@@ -618,6 +717,25 @@ const categoriaClasses: Record<string, string> = {
                           >
                             {categoria || "—"}
                           </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {analise.auditoriaData && (
+                              <span className="px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                <Shield size={12} />
+                                Auditoria
+                              </span>
+                            )}
+                            {(analise as any).temFraude && (
+                              <span className="px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 bg-red-500/10 text-red-300 border border-red-500/20">
+                                <AlertCircle size={12} />
+                                Fraude
+                              </span>
+                            )}
+                            {!analise.auditoriaData && !(analise as any).temFraude && (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -651,154 +769,413 @@ const categoriaClasses: Record<string, string> = {
               </DialogDescription>
             </DialogHeader>
             {analiseSelecionada && (
-              <div className="space-y-6 mt-4">
-                {/* Informações Básicas */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-muted-foreground text-sm">ID do Cliente</Label>
-                    <p className="text-foreground font-semibold">{analiseSelecionada.idCliente}</p>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-sm">Nome Completo</Label>
-                    <p className="text-foreground font-semibold">{analiseSelecionada.nomeCompleto || "—"}</p>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-sm">Data da Análise</Label>
-                    <p className="text-foreground font-semibold">
-                      {formatarData(analiseSelecionada.dataAnalise)}
-                    </p>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-sm">Data de Criação da Conta</Label>
-                    <p className="text-foreground font-semibold">
-                      {formatarData(analiseSelecionada.dataCriacaoConta)}
-                    </p>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-sm">Tipo de Análise</Label>
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getTipoBadgeClass(analiseSelecionada.tipoAnalise as any)}`}>
-                      {analiseSelecionada.tipoAnalise || "—"}
-                    </span>
-                  </div>
-                  <div>
-                    <Label className="text-muted-foreground text-sm">Tempo de Análise</Label>
-                    <p className="text-foreground font-semibold">
-                      {formatarTempo(analiseSelecionada.tempoAnaliseSegundos || 0)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Campos específicos de SAQUE */}
-                {analiseSelecionada.tipoAnalise === "SAQUE" && (
-                  <div className="border-t border-border pt-4">
-                    <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Saque</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Horário do Saque</Label>
-                        <p className="text-foreground font-semibold">{analiseSelecionada.horarioSaque || "—"}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Valor do Saque</Label>
-                        <p className="text-foreground font-semibold">
-                          {analiseSelecionada.valorSaque ? formatarMoeda(parseFloat(analiseSelecionada.valorSaque.toString())) : "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Métrica do Saque</Label>
-                        <p className="text-foreground font-semibold">{analiseSelecionada.metricaSaque || "—"}</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Categoria</Label>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseSelecionada.categoriaSaque)}`}>
-                          {analiseSelecionada.categoriaSaque || "—"}
-                        </span>
-                      </div>
-                      <div className="md:col-span-2">
-                        <Label className="text-muted-foreground text-sm">Jogo/Esporte</Label>
-                        <p className="text-foreground font-semibold">{analiseSelecionada.jogoEsporteSaque || "—"}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos específicos de DEPOSITO */}
-                {analiseSelecionada.tipoAnalise === "DEPOSITO" && (
-                  <div className="border-t border-border pt-4">
-                    <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Depósito</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Valor do Depósito</Label>
-                        <p className="text-foreground font-semibold">
-                          {analiseSelecionada.valorDeposito ? formatarMoeda(parseFloat(analiseSelecionada.valorDeposito.toString())) : "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Ganho/Perda</Label>
-                        <p className={`font-semibold ${
-                          parseFloat(analiseSelecionada.ganhoPerda?.toString() || "0") >= 0 
-                            ? "text-emerald-400" 
-                            : "text-rose-400"
-                        }`}>
-                          {analiseSelecionada.ganhoPerda ? formatarMoeda(parseFloat(analiseSelecionada.ganhoPerda.toString())) : "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Categoria</Label>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseSelecionada.categoriaDeposito)}`}>
-                          {analiseSelecionada.categoriaDeposito || "—"}
-                        </span>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground text-sm">Jogo/Esporte Após Depósito</Label>
-                        <p className="text-foreground font-semibold">{analiseSelecionada.jogoEsporteDepositoApos || "—"}</p>
-                      </div>
-                      {analiseSelecionada.qtdApostas && (
-                        <div>
-                          <Label className="text-muted-foreground text-sm">Quantidade de Apostas</Label>
-                          <p className="text-foreground font-semibold">{analiseSelecionada.qtdApostas}</p>
-                        </div>
-                      )}
-                      {analiseSelecionada.retornoApostas && (
-                        <div>
-                          <Label className="text-muted-foreground text-sm">Retorno das Apostas</Label>
-                          <p className="text-foreground font-semibold">
-                            {formatarMoeda(parseFloat(analiseSelecionada.retornoApostas.toString()))}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Observações */}
-                {analiseSelecionada.observacao && (
-                  <div className="border-t border-border pt-4">
-                    <Label className="text-muted-foreground text-sm">Observações</Label>
-                    <p className="text-foreground mt-2 whitespace-pre-wrap">{analiseSelecionada.observacao}</p>
-                  </div>
-                )}
-
-                {/* Informações de Auditoria */}
-                <div className="border-t border-border pt-4">
-                  <h3 className="text-lg font-semibold text-foreground mb-4">Informações de Auditoria</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-muted-foreground text-sm">Fonte de Consulta</Label>
-                      <p className="text-foreground font-semibold">{analiseSelecionada.fonteConsulta || "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-muted-foreground text-sm">Data de Auditoria</Label>
-                      <p className="text-foreground font-semibold">
-                        {formatarDataHora(analiseSelecionada.auditoriaData)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <AnaliseDetalhesContent analise={analiseSelecionada} modalAberto={modalAberto} />
             )}
           </DialogContent>
         </Dialog>
       </main>
+    </div>
+  );
+}
+
+// Componente separado para conteúdo do modal
+function AnaliseDetalhesContent({ analise, modalAberto }: { analise: any; modalAberto: boolean }) {
+  // Função auxiliar para converter data para string YYYY-MM-DD de forma segura
+  const getDataAnaliseStr = (dataAnalise: any): string | null => {
+    if (!dataAnalise) return null;
+    
+    // Se já for string no formato YYYY-MM-DD, retornar diretamente
+    if (typeof dataAnalise === 'string') {
+      // Validar formato YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dataAnalise)) {
+        return dataAnalise;
+      }
+      // Tentar converter string para Date
+      const date = new Date(dataAnalise);
+      if (!Number.isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return null;
+    }
+    
+    // Se for Date object, converter
+    if (dataAnalise instanceof Date) {
+      if (Number.isNaN(dataAnalise.getTime())) return null;
+      const year = dataAnalise.getFullYear();
+      const month = String(dataAnalise.getMonth() + 1).padStart(2, '0');
+      const day = String(dataAnalise.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // Tentar converter para Date
+    try {
+      const date = new Date(dataAnalise);
+      if (Number.isNaN(date.getTime())) return null;
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch {
+      return null;
+    }
+  };
+
+  const dataAnaliseStr = getDataAnaliseStr(analise.dataAnalise);
+
+  // Buscar análise completa da tabela correta quando o modal abrir
+  // Isso garante que os dados sejam buscados da tabela correta (saque ou deposito)
+  const { data: analiseCompleta, isLoading: loadingAnalise } = trpc.analises.getPorIdETipo.useQuery(
+    { 
+      id: analise.id, 
+      tipoAnalise: analise.tipoAnalise 
+    },
+    { 
+      enabled: Boolean(analise.id && analise.tipoAnalise && modalAberto),
+      // Não usar initialData para forçar busca do banco
+    }
+  );
+
+  // Usar análise completa se disponível, senão usar a análise original
+  // Priorizar dados do banco (analiseCompleta) que são mais completos
+  const analiseFinal = analiseCompleta || analise;
+
+  // Buscar informações de fraude e auditoria quando o modal abrir
+  const { data: fraude } = trpc.fraudes.porAnalise.useQuery(
+    { idCliente: analiseFinal.idCliente, dataAnalise: dataAnaliseStr || "" },
+    { enabled: Boolean(analiseFinal.idCliente && dataAnaliseStr && modalAberto) }
+  );
+
+  const { data: auditoria } = trpc.auditorias.porAnalise.useQuery(
+    { 
+      idCliente: analiseFinal.idCliente, 
+      dataAnalise: dataAnaliseStr || "",
+      tipoAnalise: analiseFinal.tipoAnalise 
+    },
+    { enabled: Boolean(analiseFinal.idCliente && dataAnaliseStr && modalAberto) }
+  );
+
+  // Determinar status: Auditoria, Fraude, ou ambos
+  const temAuditoria = Boolean(auditoria);
+  const temFraude = Boolean(fraude);
+  
+  return (
+    <div className="space-y-6 mt-4">
+      {/* Seção de Status - Sempre visível no topo */}
+      <div className="border border-border rounded-lg p-4 bg-muted/5">
+        <Label className="text-muted-foreground text-sm mb-3 block font-semibold">Status do Cliente</Label>
+        <div className="flex flex-wrap gap-3">
+          {temAuditoria && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 shadow-sm">
+              <Shield className="text-amber-400" size={18} />
+              <div>
+                <p className="text-amber-300 font-semibold text-sm">Auditoria</p>
+                {auditoria?.tipo && (
+                  <p className="text-amber-400/70 text-xs">{auditoria.tipo}</p>
+                )}
+              </div>
+            </div>
+          )}
+          {temFraude && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/30 shadow-sm">
+              <AlertCircle className="text-red-400" size={18} />
+              <div>
+                <p className="text-red-300 font-semibold text-sm">Fraude</p>
+                {fraude?.motivoPadrao && (
+                  <p className="text-red-400/70 text-xs">{fraude.motivoPadrao}</p>
+                )}
+              </div>
+            </div>
+          )}
+          {!temAuditoria && !temFraude && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-green-500/10 border border-green-500/30 shadow-sm">
+              <div className="w-2 h-2 rounded-full bg-green-400"></div>
+              <p className="text-green-300 font-semibold text-sm">Sem Sinalizações</p>
+            </div>
+          )}
+        </div>
+        {(temAuditoria || temFraude) && (
+          <p className="text-muted-foreground text-xs mt-3">
+            {temAuditoria && temFraude 
+              ? "⚠️ Cliente possui tanto Auditoria quanto Fraude reportadas"
+              : temAuditoria 
+              ? "⚠️ Cliente possui Auditoria aplicada"
+              : "🚨 Cliente possui Fraude reportada"}
+          </p>
+        )}
+      </div>
+
+      {/* Informações Básicas */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label className="text-muted-foreground text-sm">ID do Cliente</Label>
+          <p className="text-foreground font-semibold">
+            {analiseFinal?.idCliente ? String(analiseFinal.idCliente) : "—"}
+          </p>
+        </div>
+        <div>
+          <Label className="text-muted-foreground text-sm">Nome Completo</Label>
+          <p className="text-foreground font-semibold">
+            {analiseFinal?.nomeCompleto ? String(analiseFinal.nomeCompleto) : "—"}
+          </p>
+        </div>
+        <div>
+          <Label className="text-muted-foreground text-sm">Data da Análise</Label>
+          <p className="text-foreground font-semibold">
+            {analiseFinal?.dataAnalise ? formatarData(analiseFinal.dataAnalise) : "—"}
+          </p>
+        </div>
+        <div>
+          <Label className="text-muted-foreground text-sm">Data de Criação da Conta</Label>
+          <p className="text-foreground font-semibold">
+            {analiseFinal?.dataCriacaoConta ? formatarData(analiseFinal.dataCriacaoConta) : "—"}
+          </p>
+        </div>
+        <div>
+          <Label className="text-muted-foreground text-sm">Tipo de Análise</Label>
+          <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getTipoBadgeClass(analiseFinal?.tipoAnalise as any)}`}>
+            {analiseFinal?.tipoAnalise || "—"}
+          </span>
+        </div>
+        <div>
+          <Label className="text-muted-foreground text-sm">Tempo de Análise</Label>
+          <p className="text-foreground font-semibold">
+            {formatarTempo(analiseFinal.tempoAnaliseSegundos || 0)}
+          </p>
+        </div>
+      </div>
+
+      {/* Campos específicos de SAQUE */}
+      {analiseFinal?.tipoAnalise === "SAQUE" && (
+        <div className="border-t border-border pt-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Saque</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-muted-foreground text-sm">Horário do Saque</Label>
+              <p className="text-foreground font-semibold">{analiseFinal.horarioSaque || "—"}</p>
+            </div>
+            <div>
+              <Label className="text-muted-foreground text-sm">Valor do Saque</Label>
+              <p className="text-foreground font-semibold">
+                {analiseFinal.valorSaque ? formatarMoeda(parseFloat(analiseFinal.valorSaque.toString())) : "—"}
+              </p>
+            </div>
+            <div>
+              <Label className="text-muted-foreground text-sm">Métrica do Saque</Label>
+              <p className="text-foreground font-semibold">{analiseFinal.metricaSaque || "—"}</p>
+            </div>
+            <div>
+              <Label className="text-muted-foreground text-sm">Categoria</Label>
+              <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseFinal.categoriaSaque)}`}>
+                {analiseFinal.categoriaSaque || "—"}
+              </span>
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-muted-foreground text-sm">Jogo/Esporte</Label>
+              <p className="text-foreground font-semibold">{analiseFinal.jogoEsporteSaque || "—"}</p>
+            </div>
+            {analiseFinal.financeiro && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Indicador de Lucro</Label>
+                <p className={`font-semibold ${
+                  parseFloat(analiseFinal.financeiro.toString()) >= 0 
+                    ? "text-emerald-400" 
+                    : "text-rose-400"
+                }`}>
+                  {formatarMoeda(parseFloat(analiseFinal.financeiro.toString()))}
+                </p>
+              </div>
+            )}
+            {analiseFinal.qtdApostas && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Quantidade de Apostas</Label>
+                <p className="text-foreground font-semibold">{analiseFinal.qtdApostas}</p>
+              </div>
+            )}
+            {analiseFinal.retornoApostas && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Retorno das Apostas</Label>
+                <p className="text-foreground font-semibold">
+                  {formatarMoeda(parseFloat(analiseFinal.retornoApostas.toString()))}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Campos específicos de DEPOSITO */}
+      {analiseFinal?.tipoAnalise === "DEPOSITO" && (
+        <div className="border-t border-border pt-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Detalhes do Depósito</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-muted-foreground text-sm">Valor do Depósito</Label>
+              <p className="text-foreground font-semibold">
+                {analiseFinal.valorDeposito ? formatarMoeda(parseFloat(analiseFinal.valorDeposito.toString())) : "—"}
+              </p>
+            </div>
+            
+            <div>
+              <Label className="text-muted-foreground text-sm">Categoria</Label>
+              <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${getCategoriaBadgeClass(analiseFinal.categoriaDeposito)}`}>
+                {analiseFinal.categoriaDeposito || "—"}
+              </span>
+            </div>
+            <div>
+              <Label className="text-muted-foreground text-sm">Jogo/Esporte Após Depósito</Label>
+              <p className="text-foreground font-semibold">{analiseFinal.jogoEsporteDepositoApos || "—"}</p>
+            </div>
+            {analiseFinal.financeiro && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Indicador de Lucro</Label>
+                <p className={`font-semibold ${
+                  parseFloat(analiseFinal.financeiro.toString()) >= 0 
+                    ? "text-emerald-400" 
+                    : "text-rose-400"
+                }`}>
+                  {formatarMoeda(parseFloat(analiseFinal.financeiro.toString()))}
+                </p>
+              </div>
+            )}
+            {analiseFinal.qtdApostas && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Quantidade de Apostas</Label>
+                <p className="text-foreground font-semibold">{analiseFinal.qtdApostas}</p>
+              </div>
+            )}
+            {analiseFinal.retornoApostas && (
+              <div>
+                <Label className="text-muted-foreground text-sm">Retorno das Apostas</Label>
+                <p className="text-foreground font-semibold">
+                  {formatarMoeda(parseFloat(analiseFinal.retornoApostas.toString()))}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Observações */}
+      {analiseFinal.observacao && (
+        <div className="border-t border-border pt-4">
+          <Label className="text-muted-foreground text-sm">Observações</Label>
+          <p className="text-foreground mt-2 whitespace-pre-wrap">{analiseFinal.observacao}</p>
+        </div>
+      )}
+
+                {/* Informações de Fraude */}
+                {fraude && (
+                  <div className={`border-t ${temAuditoria ? 'border-red-500/30' : 'border-red-500/50'} pt-4`}>
+                    <div className={`rounded-md border ${temAuditoria ? 'border-red-500/40' : 'border-red-500/50'} bg-red-500/10 p-4 mb-4 ${temAuditoria ? 'shadow-lg shadow-red-500/10' : ''}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertCircle className="text-red-400" size={20} />
+                        <h3 className="text-lg font-semibold text-red-400">
+                          🚨 Fraude Reportada
+                          {temAuditoria && (
+                            <span className="ml-2 text-xs text-red-400/70 font-normal">(também possui Auditoria)</span>
+                          )}
+                        </h3>
+                      </div>
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <Label className="text-red-300/80 text-xs">Data do Registro:</Label>
+                          <p className="text-red-200 font-medium">
+                            {formatarDataHora(fraude.dataRegistro)}
+                          </p>
+                        </div>
+                        {fraude.analistaNome && (
+                          <div>
+                            <Label className="text-red-300/80 text-xs">Analista Responsável:</Label>
+                            <p className="text-red-200 font-medium">{fraude.analistaNome}</p>
+                          </div>
+                        )}
+                        <div>
+                          <Label className="text-red-300/80 text-xs font-semibold">Descrição Detalhada:</Label>
+                          <div className="mt-1 p-3 bg-red-500/5 border border-red-500/20 rounded-md">
+                            <p className="text-red-200/90 whitespace-pre-line leading-relaxed text-sm">
+                              {fraude.descricaoDetalhada}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Informações de Auditoria */}
+                {auditoria && (
+                  <div className={`border-t ${temFraude ? 'border-amber-500/30' : 'border-amber-500/50'} pt-4`}>
+                    <div className={`rounded-md border ${temFraude ? 'border-amber-500/40' : 'border-amber-500/50'} bg-amber-500/10 p-4 mb-4 ${temFraude ? 'shadow-lg shadow-amber-500/10' : ''}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Shield className="text-amber-400" size={20} />
+                        <h3 className="text-lg font-semibold text-amber-400">
+                          ⚠️ Auditoria Aplicada
+                          {temFraude && (
+                            <span className="ml-2 text-xs text-amber-400/70 font-normal">(também possui Fraude)</span>
+                          )}
+                        </h3>
+                      </div>
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <Label className="text-amber-300/80 text-xs">Tipo:</Label>
+                          <span className="ml-2 px-2 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            {auditoria.tipo}
+                          </span>
+                        </div>
+                        {auditoria.criadoEm && (
+                          <div>
+                            <Label className="text-amber-300/80 text-xs">Data de Registro:</Label>
+                            <p className="text-amber-200 font-medium">
+                              {formatarDataHora(auditoria.criadoEm)}
+                            </p>
+                          </div>
+                        )}
+                        {auditoria.nomeAnalista && (
+                          <div>
+                            <Label className="text-amber-300/80 text-xs">Analista Responsável:</Label>
+                            <p className="text-amber-200 font-medium">{auditoria.nomeAnalista}</p>
+                          </div>
+                        )}
+                        <div>
+                          <Label className="text-amber-300/80 text-xs font-semibold">Motivo:</Label>
+                          <div className="mt-1 p-3 bg-amber-500/5 border border-amber-500/20 rounded-md">
+                            <p className="text-amber-200/90 whitespace-pre-line leading-relaxed text-sm">
+                              {auditoria.motivo}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Informações Técnicas */}
+                <div className="border-t border-border pt-4">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Informações Técnicas</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground text-sm">Fonte de Consulta</Label>
+                      <p className="text-foreground font-semibold">{analiseFinal?.fonteConsulta || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground text-sm">Analista Responsável</Label>
+                      <p className="text-foreground font-semibold">
+                        {analiseFinal?.analistaNome ? String(analiseFinal.analistaNome) : (analiseFinal?.analistaId ? `ID: ${analiseFinal.analistaId}` : "Desconhecido")}
+                      </p>
+                    </div>
+                    {analiseFinal?.auditoriaData && (
+                      <div>
+                        <Label className="text-muted-foreground text-sm">Data de Auditoria</Label>
+                        <p className="text-foreground font-semibold">
+                          {formatarDataHora(analiseFinal.auditoriaData)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
     </div>
   );
 }

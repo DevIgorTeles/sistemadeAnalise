@@ -8,6 +8,13 @@
       "when": 1763777506995,
       "tag": "0008_separar_saques_depositos",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1763833835275,
+      "tag": "0001_special_golden_guardian",
+      "breakpoints": true
     }
   ]
 }

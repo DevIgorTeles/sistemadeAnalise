@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface UseTimerOptions {
   autoStart?: boolean;
@@ -38,16 +38,16 @@ export function useTimer(options: UseTimerOptions = {}) {
     };
   }, [ativo, onTick]);
 
-  const iniciar = () => setAtivo(true);
-  const pausar = () => setAtivo(false);
-  const resetar = () => {
+  const iniciar = useCallback(() => setAtivo(true), []);
+  const pausar = useCallback(() => setAtivo(false), []);
+  const resetar = useCallback(() => {
     setSegundos(0);
     setAtivo(false);
-  };
-  const reiniciar = () => {
+  }, []);
+  const reiniciar = useCallback(() => {
     setSegundos(0);
     setAtivo(true);
-  };
+  }, []);
 
   return {
     segundos,

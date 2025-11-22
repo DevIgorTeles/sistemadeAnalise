@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Card } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, User } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
-import { formatarData } from "@/utils/formatters";
+import { formatarData, formatarDataHora } from "@/utils/formatters";
 
 export default function Fraudes() {
   const { user, loading } = useAuth({
@@ -43,28 +43,47 @@ export default function Fraudes() {
               <Card key={fraude.id} className="glass-card p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center gap-3 mb-4">
                       <AlertCircle className="text-destructive" size={20} />
                       <h3 className="text-lg font-semibold text-foreground">
                         Cliente: {fraude.idCliente}
                       </h3>
                     </div>
-                    <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 text-sm">
                       <div>
-                        <span className="text-muted-foreground">Motivo:</span>
-                        <p className="text-foreground font-medium">{fraude.motivoPadrao}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Data:</span>
+                        <span className="text-muted-foreground block mb-1">Data do Registro:</span>
                         <p className="text-foreground font-medium">
                           {formatarData(fraude.dataRegistro)}
                         </p>
                       </div>
+                      <div>
+                        <span className="text-muted-foreground block mb-1">Data da Análise:</span>
+                        <p className="text-foreground font-medium">
+                          {fraude.dataAnalise ? formatarData(fraude.dataAnalise) : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block mb-1 flex items-center gap-1">
+                          <User size={14} />
+                          Analista Responsável:
+                        </span>
+                        <p className="text-foreground font-medium">
+                          {fraude.analistaNome || `ID: ${fraude.analistaId || "—"}`}
+                        </p>
+                      </div>
                     </div>
-                    {fraude.motivoLivre && (
+
+                    {fraude.descricaoDetalhada && (
                       <div className="mt-4">
-                        <span className="text-muted-foreground text-sm">Observação:</span>
-                        <p className="text-foreground text-sm mt-1">{fraude.motivoLivre}</p>
+                        <span className="text-muted-foreground text-sm font-medium block mb-2">
+                          Descrição Detalhada da Suspeita:
+                        </span>
+                        <div className="bg-destructive/5 border border-destructive/20 rounded-md p-4">
+                          <p className="text-foreground text-sm whitespace-pre-line leading-relaxed">
+                            {fraude.descricaoDetalhada}
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

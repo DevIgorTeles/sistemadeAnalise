@@ -26,9 +26,10 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { TipoAnaliseSelector } from "@/components/analise/TipoAnaliseSelector";
 import { TimerCard } from "@/components/analise/TimerCard";
 import { DuplicadoAlert } from "@/components/analise/DuplicadoAlert";
+import { FraudeAlert } from "@/components/analise/FraudeAlert";
 import { MultiSelect } from "@/components/analise/MultiSelect";
 import { useTimer } from "@/hooks/useTimer";
-import { formatarDataHora } from "@/utils/formatters";
+import { formatarData, formatarDataHora } from "@/utils/formatters";
 import { getDataHojeBrasilia, paraISOStringBrasilia } from "@/utils/timezone";
 
 export default function NovaAnalise() {
@@ -68,6 +69,11 @@ export default function NovaAnalise() {
   const [auditoriaTipo, setAuditoriaTipo] = useState<"ESPORTIVO" | "CASSINO" | "">("");
   const [auditoriaMotivo, setAuditoriaMotivo] = useState("");
   const [auditoriaErro, setAuditoriaErro] = useState("");
+  
+  // Estados do modal de fraude
+  const [fraudeModalAberto, setFraudeModalAberto] = useState(false);
+  const [fraudeDescricao, setFraudeDescricao] = useState("");
+  const [fraudeErro, setFraudeErro] = useState("");
 
   // Cronômetro automático usando hook customizado
   const timer = useTimer({ autoStart: false });
@@ -127,25 +133,30 @@ export default function NovaAnalise() {
       if (!timer.ativo) {
         timer.reiniciar();
       }
-    } else if (!idCliente || isDuplicado) {
-      // Pausar timer se não houver ID ou se houver duplicidade
+    } else if ((!idCliente || isDuplicado) && timer.ativo) {
+      // Pausar timer apenas se estiver ativo e não houver ID ou se houver duplicidade
       timer.pausar();
     }
-  }, [idCliente, dataAnalise, isDuplicado, timer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idCliente, dataAnalise, isDuplicado]);
 
   // Validação rigorosa: verificar duplicidade do mesmo tipo na mesma data
   useEffect(() => {
     if (!idCliente || !dataAnalise) {
       setIsDuplicado(false);
       alertaDuplicadoRef.current = null;
-      timer.pausar();
+      if (timer.ativo) {
+        timer.pausar();
+      }
       return;
     }
 
     // Verificar se há análise do mesmo tipo na data informada
     if (verificacaoHoje?.duplicado && verificacaoHoje?.analise) {
       setIsDuplicado(true);
-      timer.pausar();
+      if (timer.ativo) {
+        timer.pausar();
+      }
       
       const keyAlerta = `${idCliente}-${dataAnalise}-${tipoAnalise}`;
       if (alertaDuplicadoRef.current !== keyAlerta) {
@@ -159,7 +170,8 @@ export default function NovaAnalise() {
       setIsDuplicado(false);
       alertaDuplicadoRef.current = null;
     }
-  }, [verificacaoHoje, idCliente, dataAnalise, tipoAnalise, analiseDoDia, timer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verificacaoHoje, idCliente, dataAnalise, tipoAnalise, analiseDoDia]);
 
   // Função auxiliar para limpar todos os campos do formulário (exceto ID do cliente e data de análise)
   const limparCamposFormulario = () => {
@@ -215,9 +227,10 @@ export default function NovaAnalise() {
     }
   }, [ultimaAnalise, dataCriacaoContaBuscada, idCliente, isDuplicado]);
 
-  // Limpar campos quando ID do cliente é removido
+  // Limpar TODOS os campos quando ID do cliente é removido/apagado
   useEffect(() => {
     if (idCliente.length === 0) {
+      // Limpar todos os campos do formulário
       setNomeCompleto("");
       setDataCriacaoConta("");
       setHorarioSaque("");
@@ -230,12 +243,27 @@ export default function NovaAnalise() {
       setJogoEsporteDepositoApos("");
       setFinanceiro("");
       setObservacao("");
-      // Não resetar tipoAnalise - manter o tipo selecionado (SAQUE ou DEPOSITO)
+      // Limpar campos de auditoria
       setAuditoriaMarcada(false);
       setAuditoriaTipo("");
       setAuditoriaMotivo("");
       setAuditoriaErro("");
+      // Limpar campos de fraude
+      setFraudeDescricao("");
+      setFraudeErro("");
+      // Resetar estados
+      setIsDuplicado(false);
+      setIsLoading(false);
+      alertaDuplicadoRef.current = null;
+      // Resetar e pausar timer apenas se estiver ativo
+      if (timer.ativo) {
+        timer.resetar();
+        timer.pausar();
+      }
+      // Não resetar tipoAnalise - manter o tipo selecionado (SAQUE ou DEPOSITO)
+      // Não resetar dataAnalise - manter a data selecionada
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idCliente]);
 
   // Limpar campos específicos do tipo quando o tipo de análise mudar
@@ -304,6 +332,27 @@ export default function NovaAnalise() {
       toast.error(`Erro ao registrar auditoria: ${error.message || "Erro desconhecido"}`, {
         duration: 5000
       });
+    },
+  });
+
+  const reportarFraudeMutation = trpc.fraudes.reportar.useMutation({
+    onSuccess: () => {
+      toast.success("✅ Fraude reportada com sucesso! Análise finalizada.", {
+        duration: 5000
+      });
+      // Limpar campos do formulário e manter usuário na mesma tela para nova análise
+      setIdCliente("");
+      limparCamposFormulario();
+      setDataAnalise(getDataHojeBrasilia());
+      setFraudeModalAberto(false);
+      setFraudeDescricao("");
+      setFraudeErro("");
+    },
+    onError: (error) => {
+      toast.error(`Erro ao reportar fraude: ${error.message || "Erro desconhecido"}`, {
+        duration: 5000
+      });
+      setFraudeErro(error.message || "Erro ao reportar fraude");
     },
   });
 
@@ -448,7 +497,10 @@ export default function NovaAnalise() {
         // ganhoPerda não é enviado do frontend - campo opcional no banco
         observacao: observacaoTrimmed || undefined,
         tempoAnaliseSegundos: timer.segundos,
-      });
+        // REGRA DE NEGÓCIO: auditoriaUsuario é boolean
+        // TRUE = auditoria marcada, FALSE = não marcada
+        auditoriaUsuario: auditoriaMarcada,
+      } as any); // Type assertion necessário devido à inferência do Zod com discriminated union
       
       // Toast informativo específico por tipo de análise
       const tipoTexto = tipoAnalise === "SAQUE" ? "SAQUE" : "DEPÓSITO";
@@ -486,7 +538,74 @@ export default function NovaAnalise() {
   };
 
   const handleReportarFraude = () => {
-    toast.info("Modal de fraude em desenvolvimento");
+    if (!idCliente.trim()) {
+      toast.error("Informe o ID do cliente antes de reportar fraude");
+      return;
+    }
+    setFraudeErro("");
+    setFraudeDescricao("");
+    setFraudeModalAberto(true);
+  };
+
+  const handleConfirmarFraude = async () => {
+    const idClienteTrimmed = idCliente.trim();
+    const descricaoTrimmed = fraudeDescricao.trim();
+
+    if (!idClienteTrimmed) {
+      setFraudeErro("ID do cliente é obrigatório");
+      return;
+    }
+
+    if (!dataAnalise) {
+      setFraudeErro("Data da análise é obrigatória");
+      return;
+    }
+
+    if (!descricaoTrimmed || descricaoTrimmed.length < 10) {
+      setFraudeErro("Descrição detalhada é obrigatória (mínimo 10 caracteres)");
+      return;
+    }
+
+    if (isDuplicado) {
+      toast.error("Este usuário já foi analisado na data de hoje.", {
+        duration: 5000,
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setFraudeErro("");
+
+    try {
+      // Reportar a fraude
+      await reportarFraudeMutation.mutateAsync({
+        idCliente: idClienteTrimmed,
+        dataAnalise: dataAnalise,
+        descricaoDetalhada: descricaoTrimmed,
+        motivoPadrao: "FRAUDE_REPORTADA", // Motivo padrão
+        motivoLivre: undefined,
+      });
+
+      // Finalizar a análise (contar como análise concluída)
+      await finalizarMutation.mutateAsync({
+        idCliente: idClienteTrimmed,
+        dataAnalise: dataAnalise,
+      });
+
+      // Resetar cronômetro após sucesso
+      timer.resetar();
+    } catch (error: any) {
+      console.error("Erro ao reportar fraude:", error);
+      // O erro já é tratado no onError da mutation
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelarFraude = () => {
+    setFraudeModalAberto(false);
+    setFraudeDescricao("");
+    setFraudeErro("");
   };
 
   const abrirModalAuditoria = () => {
@@ -532,12 +651,6 @@ export default function NovaAnalise() {
         <PageHeader
           title="Nova Análise"
           backUrl="/"
-          backLabel={
-            <>
-              <ArrowLeft size={16} className="text-white" />
-              Voltar
-            </>
-          }
         />
 
         {isDuplicado && verificacaoHoje?.analise && (
@@ -545,6 +658,13 @@ export default function NovaAnalise() {
             idCliente={idCliente}
             dataAnalise={dataAnalise}
             tipoAnalise={tipoAnalise}
+          />
+        )}
+
+        {clienteComFraude && idCliente && fraudeStatus?.fraudes && fraudeStatus.fraudes.length > 0 && (
+          <FraudeAlert
+            idCliente={idCliente}
+            ultimaFraude={fraudeStatus.fraudes[0] || null}
           />
         )}
 
@@ -1023,6 +1143,104 @@ export default function NovaAnalise() {
             </Button>
             <Button onClick={handleConfirmarAuditoria} className="btn-primary">
               Confirmar auditoria
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Reporte de Fraude */}
+      <Dialog open={fraudeModalAberto} onOpenChange={(open) => {
+        if (!open) {
+          handleCancelarFraude();
+        } else {
+          setFraudeModalAberto(true);
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle size={20} />
+              Reportar Fraude
+            </DialogTitle>
+            <DialogDescription>
+              Preencha os dados abaixo para reportar uma suspeita de fraude. Esta ação finalizará a análise automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {dataAnalise && (
+              <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+                <p className="text-foreground/90">
+                  <strong>Data da análise:</strong> {formatarData(dataAnalise)}
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="fraudeDescricao" className="text-sm font-medium text-foreground">
+                Descrição Detalhada da Suspeita *
+              </Label>
+              <Textarea
+                id="fraudeDescricao"
+                value={fraudeDescricao}
+                onChange={(e) => {
+                  setFraudeErro("");
+                  setFraudeDescricao(e.target.value);
+                }}
+                placeholder="Descreva detalhadamente:&#10;- A suspeita identificada&#10;- Motivo do reporte&#10;- Evidências observadas&#10;- Qualquer informação relevante"
+                className="mt-2 min-h-[200px]"
+                rows={8}
+                disabled={isLoading}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Mínimo 10 caracteres. Inclua descrição detalhada, motivo e evidências.
+                </p>
+                <p className={`text-xs ${fraudeDescricao.length < 10 ? "text-destructive" : "text-muted-foreground"}`}>
+                  {fraudeDescricao.length}/10
+                </p>
+              </div>
+            </div>
+
+            {fraudeErro && (
+              <div className="text-sm text-destructive flex items-center gap-2 bg-destructive/10 p-3 rounded-md border border-destructive/20">
+                <AlertCircle size={16} />
+                {fraudeErro}
+              </div>
+            )}
+
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+              <p className="text-foreground/90">
+                <strong>⚠️ Atenção:</strong> Ao reportar esta fraude, a análise será automaticamente finalizada e contabilizada como concluída.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={handleCancelarFraude}
+              disabled={isLoading}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmarFraude} 
+              variant="destructive"
+              disabled={isLoading || !fraudeDescricao.trim() || fraudeDescricao.trim().length < 10}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin mr-2" size={16} />
+                  Reportando...
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="mr-2" size={16} />
+                  Reportar Fraude e Finalizar
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

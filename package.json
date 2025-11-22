@@ -11,7 +11,12 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:push-with-migrate": "drizzle-kit generate && drizzle-kit migrate",
+    "migrate:fraudes": "node scripts/add_fraudes_campos.js",
+    "investigar:fraude": "node scripts/investigar_usuariofraude.js",
     "fix:passwords": "tsx fix_passwords.ts",
     "verify:users": "tsx verificar_usuarios.ts"
   },

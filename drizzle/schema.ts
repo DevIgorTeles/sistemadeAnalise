@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, date, json, index } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, date, json, index, boolean } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
 
 /**
@@ -72,8 +72,9 @@ export const saques = mysqlTable("saques", {
   observacao: text("observacao"),
   // Internal BD2 fields
   fonteConsulta: varchar("fonte_consulta", { length: 64 }),
-  auditoriaUsuario: int("auditoria_usuario"),
-  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando análise for marcada como auditoria
+  analistaId: int("analista_id"), // ID do usuário que fez a análise (nullable para análises antigas)
+  auditoriaUsuario: boolean("auditoria_usuario"), // TRUE = auditoria marcada, FALSE = não marcada
+  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando auditoriaUsuario = TRUE
 }, (table) => ({
   // Índice composto mais usado: busca saques por cliente e data
   clienteDataIdx: index("idx_saques_cliente_data").on(table.idCliente, table.dataAnalise),
@@ -81,11 +82,13 @@ export const saques = mysqlTable("saques", {
   clienteIdx: index("idx_saques_cliente").on(table.idCliente),
   // Índice em dataAnalise para ordenações e filtros por data
   dataAnaliseIdx: index("idx_saques_data").on(table.dataAnalise),
-  // Índice em auditoriaUsuario para filtrar por analista
+  // Índice em analistaId para filtrar por analista
+  analistaIdIdx: index("idx_saques_analista_id").on(table.analistaId),
+  // Índice em auditoriaUsuario para filtrar análises auditadas
   auditoriaUsuarioIdx: index("idx_saques_auditoria_usuario").on(table.auditoriaUsuario),
   // Índice em auditoriaData para ordenações
   auditoriaDataIdx: index("idx_saques_auditoria_data").on(table.auditoriaData),
-  // Índice composto para métricas por analista e data
+  // Índice composto para métricas por auditoria e data
   usuarioDataIdx: index("idx_saques_usuario_data").on(table.auditoriaUsuario, table.dataAnalise),
 }));
 
@@ -115,8 +118,9 @@ export const depositos = mysqlTable("depositos", {
   observacao: text("observacao"),
   // Internal BD2 fields
   fonteConsulta: varchar("fonte_consulta", { length: 64 }),
-  auditoriaUsuario: int("auditoria_usuario"),
-  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando análise for marcada como auditoria
+  analistaId: int("analista_id"), // ID do usuário que fez a análise (nullable para análises antigas)
+  auditoriaUsuario: boolean("auditoria_usuario"), // TRUE = auditoria marcada, FALSE = não marcada
+  auditoriaData: timestamp("auditoria_data"), // Nullable - só preencher quando auditoriaUsuario = TRUE
 }, (table) => ({
   // Índice composto mais usado: busca depositos por cliente e data
   clienteDataIdx: index("idx_depositos_cliente_data").on(table.idCliente, table.dataAnalise),
@@ -142,6 +146,8 @@ export const fraudes = mysqlTable("fraudes", {
   id: int("id").autoincrement().primaryKey(),
   idCliente: varchar("id_cliente", { length: 64 }).notNull(),
   dataRegistro: timestamp("data_registro").defaultNow().notNull(),
+  dataAnalise: date("data_analise").notNull(), // Data da análise quando a fraude foi reportada
+  descricaoDetalhada: text("descricao_detalhada").notNull(), // Campo descritivo obrigatório
   motivoPadrao: varchar("motivo_padrao", { length: 255 }).notNull(),
   motivoLivre: text("motivo_livre"),
   analistaId: int("analista_id"),
@@ -243,8 +249,8 @@ export const saquesRelations = relations(saques, ({ one }) => ({
     fields: [saques.idCliente],
     references: [clientes.idCliente],
   }),
-  usuario: one(users, {
-    fields: [saques.auditoriaUsuario],
+  analista: one(users, {
+    fields: [saques.analistaId],
     references: [users.id],
   }),
 }));
@@ -255,8 +261,8 @@ export const depositosRelations = relations(depositos, ({ one }) => ({
     fields: [depositos.idCliente],
     references: [clientes.idCliente],
   }),
-  usuario: one(users, {
-    fields: [depositos.auditoriaUsuario],
+  analista: one(users, {
+    fields: [depositos.analistaId],
     references: [users.id],
   }),
 }));

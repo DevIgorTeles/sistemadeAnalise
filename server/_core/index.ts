@@ -4,7 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 // OAuth removido - Sistema local com JWT
-import { appRouter } from "../routers";
+import { appRouter } from "../routers/index";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerLocalAuthRoutes } from "./localAuth";
@@ -12,7 +12,7 @@ import { applySecurityMiddleware, userRateLimiter } from "./security";
 import { validateEnvironmentVariables } from "./envValidation";
 import { configureCors } from "./cors";
 import { initCache, closeCache } from "./cache";
-import { closeDb } from "../db";
+import { closeDb } from "../db/connection";
 import { logger } from "./logger";
 import { sendErrorResponse } from "./errorHandler";
 

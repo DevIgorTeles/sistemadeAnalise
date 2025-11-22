@@ -58,6 +58,9 @@ CREATE TABLE `depositos` (
 );
 
 -- Migrar dados de SAQUE da tabela analises para saques
+-- NOTA: Se a tabela analises não existir (banco novo), estes INSERTs serão ignorados
+-- Execute manualmente se precisar migrar dados de um banco antigo:
+/*
 INSERT INTO `saques` (
 	`id_cliente`,
 	`nome_completo`,
@@ -97,8 +100,12 @@ SELECT
 	`auditoria_data`
 FROM `analises`
 WHERE `tipo_analise` = 'SAQUE';
+*/
 
 -- Migrar dados de DEPOSITO da tabela analises para depositos
+-- NOTA: Se a tabela analises não existir (banco novo), estes INSERTs serão ignorados
+-- Execute manualmente se precisar migrar dados de um banco antigo:
+/*
 INSERT INTO `depositos` (
 	`id_cliente`,
 	`nome_completo`,
@@ -136,6 +143,7 @@ SELECT
 	`auditoria_data`
 FROM `analises`
 WHERE `tipo_analise` = 'DEPOSITO';
+*/
 
 -- NOTA: A tabela analises não será removida automaticamente para manter backup dos dados
 -- Execute manualmente após validar a migração: DROP TABLE `analises`;

@@ -45,7 +45,8 @@ export function useAuth(options?: UseAuthOptions) {
     }
   }, [logoutMutation, utils]);
 
-  const state = useMemo(() => {
+  // Mover side effects do localStorage para useEffect separado
+  useEffect(() => {
     if (typeof window !== "undefined") {
       if (meQuery.data) {
         localStorage.setItem(
@@ -56,6 +57,9 @@ export function useAuth(options?: UseAuthOptions) {
         localStorage.removeItem("manus-runtime-user-info");
       }
     }
+  }, [meQuery.data]);
+
+  const state = useMemo(() => {
     return {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
@@ -73,7 +77,7 @@ export function useAuth(options?: UseAuthOptions) {
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;
     if (meQuery.isLoading || logoutMutation.isPending) return;
-    if (state.user) return;
+    if (meQuery.data) return; // Usar meQuery.data diretamente ao invés de state.user
     if (typeof window === "undefined") return;
     const redirectUrl = new URL(
       redirectPath,
@@ -94,7 +98,7 @@ export function useAuth(options?: UseAuthOptions) {
     preserveNext,
     logoutMutation.isPending,
     meQuery.isLoading,
-    state.user,
+    meQuery.data, // Usar meQuery.data diretamente ao invés de state.user para evitar loops
   ]);
 
   return {
