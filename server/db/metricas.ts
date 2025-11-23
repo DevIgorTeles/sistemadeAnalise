@@ -4,8 +4,8 @@
  * REFATORADO: Versão limpa e funcional
  */
 
-import { eq, and, desc, gte, lte, like } from "drizzle-orm";
-import { saques, depositos, fraudes, users } from "../../drizzle/schema";
+import { eq, and, desc, gte, lte, like, or } from "drizzle-orm";
+import { saques, depositos, fraudes, users, clientes } from "../../drizzle/schema";
 import { getDb } from "./connection";
 
 /**
@@ -165,41 +165,104 @@ async function buscarDepositos(filtros: MetricasFiltros) {
 }
 
 /**
- * Busca fraudes no período para marcar análises com fraude
+ * Busca fraudes para marcar análises com fraude
+ * CORRIGIDO: Busca TODAS as fraudes dos clientes que aparecem nas análises,
+ * não apenas as que correspondem ao filtro de data
+ * CORRIGIDO: Normaliza datas para garantir match correto
  */
-async function buscarFraudesNoPeriodo(filtros: MetricasFiltros) {
+async function buscarFraudesParaAnalises(idsClientes: string[], datasAnalise: string[]) {
   const db = await getDb();
-  if (!db) return new Set<string>();
+  if (!db || idsClientes.length === 0) return new Set<string>();
   
-  const conditions: any[] = [];
+  console.log(`[Metricas] Buscando fraudes para ${idsClientes.length} clientes únicos`);
   
-  if (filtros.id_cliente) {
-    conditions.push(like(fraudes.idCliente, `%${filtros.id_cliente}%`));
-  }
-  if (filtros.data_inicio) {
-    conditions.push(gte(fraudes.dataAnalise, filtros.data_inicio));
-  }
-  if (filtros.data_fim) {
-    conditions.push(lte(fraudes.dataAnalise, filtros.data_fim));
-  }
-  
-  let query = db
+  // Buscar TODAS as fraudes dos clientes que aparecem nas análises
+  // Isso garante que fraudes reportadas em qualquer data sejam encontradas
+  const fraudesResult = await db
     .select({
       idCliente: fraudes.idCliente,
       dataAnalise: fraudes.dataAnalise,
     })
-    .from(fraudes);
+    .from(fraudes)
+    .where(
+      or(...idsClientes.map(id => eq(fraudes.idCliente, id)))
+    );
   
-  if (conditions.length > 0) {
-    query = query.where(and(...conditions)) as any;
-  }
+  console.log(`[Metricas] Encontradas ${fraudesResult.length} fraudes para os clientes`);
   
-  const fraudesResult = await query;
+  // Função auxiliar para normalizar data para string YYYY-MM-DD
+  const normalizarData = (data: any): string => {
+    if (!data) return '';
+    // Se já for string no formato YYYY-MM-DD, retornar diretamente
+    if (typeof data === 'string') {
+      // Extrair apenas a parte da data (YYYY-MM-DD) se houver hora
+      const match = data.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (match) return match[1];
+      return data;
+    }
+    // Se for Date object, converter para YYYY-MM-DD
+    if (data instanceof Date) {
+      const year = data.getFullYear();
+      const month = String(data.getMonth() + 1).padStart(2, '0');
+      const day = String(data.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    // Tentar converter para Date e depois para string
+    try {
+      const date = new Date(data);
+      if (!Number.isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch {
+      // Ignorar erros de conversão
+    }
+    return '';
+  };
   
-  // Criar Set com chaves únicas (idCliente + dataAnalise)
-  return new Set(
-    fraudesResult.map(f => `${f.idCliente}|${f.dataAnalise?.toString() || ''}`)
-  );
+  // Criar Set com chaves únicas (idCliente + dataAnalise normalizada)
+  // Uma fraude marca TODAS as análises daquele cliente naquela data
+  const fraudesSet = new Set<string>();
+  
+  fraudesResult.forEach(fraude => {
+    // Normalizar data da fraude antes de criar a chave
+    const dataNormalizada = normalizarData(fraude.dataAnalise);
+    const chave = `${fraude.idCliente}|${dataNormalizada}`;
+    fraudesSet.add(chave);
+    console.log(`[Metricas] Adicionando fraude ao Set: ${chave} (data original: ${fraude.dataAnalise}, normalizada: ${dataNormalizada})`);
+  });
+  
+  console.log(`[Metricas] Total de chaves de fraude no Set: ${fraudesSet.size}`);
+  console.log(`[Metricas] Chaves de fraude:`, Array.from(fraudesSet).slice(0, 10));
+  
+  return fraudesSet;
+}
+
+/**
+ * Busca status dos clientes
+ */
+async function buscarStatusClientes(idsClientes: string[]) {
+  const db = await getDb();
+  if (!db || idsClientes.length === 0) return new Map<string, string>();
+  
+  const clientesResult = await db
+    .select({
+      idCliente: clientes.idCliente,
+      statusCliente: clientes.statusCliente,
+    })
+    .from(clientes)
+    .where(
+      or(...idsClientes.map(id => eq(clientes.idCliente, id)))
+    );
+  
+  const statusMap = new Map<string, string>();
+  clientesResult.forEach(cliente => {
+    statusMap.set(cliente.idCliente, cliente.statusCliente || 'OK');
+  });
+  
+  return statusMap;
 }
 
 /**
@@ -217,11 +280,19 @@ export async function listarMetricasAnalises(filtros: MetricasFiltros) {
   const deveBuscarDepositos = !filtros.tipo_analise || filtros.tipo_analise === "DEPOSITO";
   
   // Buscar análises em paralelo de ambas as tabelas
-  const [saquesResult, depositosResult, fraudesSet] = await Promise.all([
+  const [saquesResult, depositosResult] = await Promise.all([
     deveBuscarSaques ? buscarSaques(filtros) : Promise.resolve([]),
     deveBuscarDepositos ? buscarDepositos(filtros) : Promise.resolve([]),
-    buscarFraudesNoPeriodo(filtros),
   ]);
+  
+  console.log(`[Metricas] Buscando análises com filtros:`, {
+    tipo_analise: filtros.tipo_analise,
+    data_inicio: filtros.data_inicio,
+    data_fim: filtros.data_fim,
+    id_cliente: filtros.id_cliente,
+    analista_id: filtros.analista_id,
+  });
+  console.log(`[Metricas] Saques encontrados: ${saquesResult.length}, Depósitos encontrados: ${depositosResult.length}`);
   
   // Combinar resultados de ambas as tabelas
   if (deveBuscarSaques) {
@@ -232,19 +303,87 @@ export async function listarMetricasAnalises(filtros: MetricasFiltros) {
     results.push(...depositosResult);
   }
   
-  // Adicionar campo temFraude - preservar todos os valores originais do banco
+  console.log(`[Metricas] Total de análises combinadas: ${results.length}`);
+  
+  // Log de análises com auditoria e fraude para debug
+  const analisesComAuditoria = results.filter(a => a.auditoriaUsuario === true || a.auditoriaData);
+  const analisesComAuditoriaData = results.filter(a => a.auditoriaData);
+  console.log(`[Metricas] Análises com auditoriaUsuario=true: ${analisesComAuditoria.length}, com auditoriaData: ${analisesComAuditoriaData.length}`);
+  
+  // Buscar fraudes e status dos clientes que aparecem nas análises
+  const idsClientesUnicos = [...new Set(results.map(a => a.idCliente).filter(Boolean))];
+  const datasAnaliseUnicas = [...new Set(results.map(a => a.dataAnalise?.toString()).filter(Boolean))];
+  
+  const [fraudesSet, clientesStatus] = await Promise.all([
+    buscarFraudesParaAnalises(idsClientesUnicos, datasAnaliseUnicas),
+    buscarStatusClientes(idsClientesUnicos),
+  ]);
+  
+  // Função auxiliar para normalizar data para string YYYY-MM-DD
+  const normalizarData = (data: any): string => {
+    if (!data) return '';
+    // Se já for string no formato YYYY-MM-DD, retornar diretamente
+    if (typeof data === 'string') {
+      // Extrair apenas a parte da data (YYYY-MM-DD) se houver hora
+      const match = data.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (match) return match[1];
+      return data;
+    }
+    // Se for Date object, converter para YYYY-MM-DD
+    if (data instanceof Date) {
+      const year = data.getFullYear();
+      const month = String(data.getMonth() + 1).padStart(2, '0');
+      const day = String(data.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    // Tentar converter para Date e depois para string
+    try {
+      const date = new Date(data);
+      if (!Number.isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch {
+      // Ignorar erros de conversão
+    }
+    return '';
+  };
+  
+  // Adicionar campo temFraude e statusCliente - preservar todos os valores originais do banco
   const resultsComFraude = results.map(analise => {
-    const chave = `${analise.idCliente || ''}|${analise.dataAnalise?.toString() || ''}`;
+    // Normalizar data da análise antes de criar a chave para garantir match correto
+    const dataNormalizada = normalizarData(analise.dataAnalise);
+    const chave = `${analise.idCliente || ''}|${dataNormalizada}`;
+    const statusCliente = clientesStatus.get(analise.idCliente) || 'OK';
+    const temFraude = fraudesSet.has(chave);
+    
+    // Log para debug de análises com fraude
+    if (temFraude) {
+      console.log(`[Metricas] ✅ Análise ${analise.id} (${analise.idCliente}) marcada com fraude. Chave: ${chave}`);
+    }
     
     return {
       ...analise,
-      temFraude: fraudesSet.has(chave),
+      temFraude: temFraude,
+      statusCliente: statusCliente,
       // Não normalizar - preservar valores exatamente como vêm do banco
     };
   });
   
-  // Ordenar resultados combinados por data de análise (mais recente primeiro)
-  return resultsComFraude.sort((a, b) => {
+  // Ordenar resultados combinados
+  // PRIORIDADE: Análises com auditoria/fraude aparecem primeiro
+  const resultadosOrdenados = resultsComFraude.sort((a, b) => {
+    // Priorizar análises com auditoria OU fraude
+    const aTemProblema = Boolean(a.auditoriaData || (a as any).temFraude);
+    const bTemProblema = Boolean(b.auditoriaData || (b as any).temFraude);
+    
+    // Se uma tem problema e outra não, a com problema vem primeiro
+    if (aTemProblema && !bTemProblema) return -1;
+    if (!aTemProblema && bTemProblema) return 1;
+    
+    // Se ambas têm ou não têm problema, ordenar por data (mais recente primeiro)
     if (!a.dataAnalise && !b.dataAnalise) return 0;
     if (!a.dataAnalise) return 1;
     if (!b.dataAnalise) return -1;
@@ -257,4 +396,26 @@ export async function listarMetricasAnalises(filtros: MetricasFiltros) {
     // Se mesma data, ordenar por ID (mais recente primeiro)
     return (b.id || 0) - (a.id || 0);
   });
+  
+  // Log detalhado para debug
+  console.log(`[Metricas] Total de análises retornadas: ${resultadosOrdenados.length}`);
+  console.log(`[Metricas] Análises com auditoria: ${resultadosOrdenados.filter(a => a.auditoriaData).length}`);
+  console.log(`[Metricas] Análises com fraude: ${resultadosOrdenados.filter(a => (a as any).temFraude).length}`);
+  console.log(`[Metricas] Análises com auditoria E fraude: ${resultadosOrdenados.filter(a => a.auditoriaData && (a as any).temFraude).length}`);
+  
+  // Log de algumas análises para debug
+  if (resultadosOrdenados.length > 0) {
+    const primeirasAnalises = resultadosOrdenados.slice(0, 5);
+    console.log(`[Metricas] Primeiras 5 análises:`, primeirasAnalises.map(a => ({
+      id: a.id,
+      idCliente: a.idCliente,
+      dataAnalise: a.dataAnalise,
+      tipoAnalise: a.tipoAnalise,
+      temFraude: (a as any).temFraude,
+      auditoriaData: a.auditoriaData,
+      auditoriaUsuario: a.auditoriaUsuario,
+    })));
+  }
+  
+  return resultadosOrdenados;
 }

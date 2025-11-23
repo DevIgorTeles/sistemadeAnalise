@@ -429,12 +429,36 @@ export async function criarAnalise(analise: AnaliseInput) {
     : analise.dataCriacaoConta ?? null;
   
   // Inserir na tabela específica baseado no tipo
-  if (analise.tipoAnalise === "SAQUE") {
-    const saque = buildSaqueFromInput(analise, dataAnalise, dataCriacaoConta);
-    await db.insert(saques).values(saque);
-  } else {
-    const deposito = buildDepositoFromInput(analise, dataAnalise, dataCriacaoConta);
-    await db.insert(depositos).values(deposito);
+  try {
+    if (analise.tipoAnalise === "SAQUE") {
+      const saque = buildSaqueFromInput(analise, dataAnalise, dataCriacaoConta);
+      console.log("[Database] Inserindo saque:", { 
+        idCliente: saque.idCliente, 
+        dataAnalise: saque.dataAnalise, 
+        tipoAnalise: "SAQUE",
+        auditoriaUsuario: saque.auditoriaUsuario,
+        auditoriaData: saque.auditoriaData,
+        analistaId: saque.analistaId,
+      });
+      const result = await db.insert(saques).values(saque);
+      console.log("[Database] ✅ Saque inserido com sucesso:", result);
+    } else {
+      const deposito = buildDepositoFromInput(analise, dataAnalise, dataCriacaoConta);
+      console.log("[Database] Inserindo depósito:", { 
+        idCliente: deposito.idCliente, 
+        dataAnalise: deposito.dataAnalise, 
+        tipoAnalise: "DEPOSITO",
+        auditoriaUsuario: deposito.auditoriaUsuario,
+        auditoriaData: deposito.auditoriaData,
+        analistaId: deposito.analistaId,
+      });
+      const result = await db.insert(depositos).values(deposito);
+      console.log("[Database] ✅ Depósito inserido com sucesso:", result);
+    }
+  } catch (error: any) {
+    console.error("[Database] ❌ Erro ao inserir análise:", error.message);
+    console.error("[Database] Stack:", error.stack);
+    throw error;
   }
   
   // Invalidar cache relacionado a análises

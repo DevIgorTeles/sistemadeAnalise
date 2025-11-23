@@ -23,55 +23,60 @@ cp .env.example .env
 
 ### Configuração do Banco de Dados
 
-1. **Criar o banco de dados:**
-```sql
-CREATE DATABASE opa_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+#### 🚀 Para Novos Usuários (Setup Completo do Zero)
+
+**Opção 1: Script SQL Completo (RECOMENDADO - Mais Rápido)**
+
+Este script cria o banco de dados e TODAS as tabelas necessárias do zero:
+
+```bash
+# Execute o script SQL que cria tudo automaticamente
+mysql -u root -padmin < setup_banco.sql
+
+# Ou se o banco já existe:
+mysql -u root -padmin opa_system < setup_banco.sql
 ```
 
-2. **Sincronizar schema com o banco de dados (Recomendado para desenvolvimento):**
+O script `setup_banco.sql` cria automaticamente:
+- ✅ Banco de dados `opa_system` (se não existir)
+- ✅ Tabela `users` (usuários do sistema)
+- ✅ Tabela `clientes` (clientes analisados)
+- ✅ Tabela `saques` (análises de saques)
+- ✅ Tabela `depositos` (análises de depósitos)
+- ✅ Tabela `fraudes` (relatórios de fraude)
+- ✅ Tabela `auditorias` (registros de auditoria)
+- ✅ Tabela `logs_auditoria` (logs do sistema)
+- ✅ Tabela `refresh_tokens` (tokens de autenticação)
+- ✅ Todos os índices e foreign keys necessários
+
+**Opção 2: Usando Drizzle (Alternativa)**
+
+Se preferir usar o Drizzle ORM para sincronizar o schema:
+
 ```bash
+# Sincronizar schema com o banco de dados
 pnpm db:push
 ```
 
-Este comando sincroniza diretamente o schema com o banco de dados, sem precisar gerar migrations. É a forma mais simples e recomendada para desenvolvimento.
+**Depois de criar as tabelas, inicialize com usuário admin:**
 
-**Alternativa - Usar migrations (para produção):**
 ```bash
-# Gerar migrations a partir do schema
-pnpm db:generate
-
-# Aplicar migrations no banco de dados
-pnpm db:migrate
+# Execute o script que cria o usuário administrador inicial
+mysql -u root -padmin opa_system < insert_test_users.sql
 ```
 
-Ou fazer ambos de uma vez:
+Ou use o script Node.js:
 ```bash
-pnpm db:push-with-migrate
+pnpm fix:passwords
 ```
 
-4. **Inicializar banco com usuário admin:**
-```bash
-# Linux/Mac
-chmod +x scripts/reset_database.sh
-./scripts/reset_database.sh
+#### 🔄 Para Usuários Existentes (Atualizar Tabelas)
 
-# Windows (PowerShell)
-.\scripts\reset_database.ps1
-```
+Se você já tem o banco configurado e precisa apenas atualizar as tabelas:
 
-Ou execute manualmente o SQL:
 ```bash
-mysql -u seu_usuario -p opa_system < scripts/init_database.sql
-```
-
-**Resumo rápido (criação do zero):**
-```bash
-# 1. Criar banco no MySQL (manual)
-# 2. Sincronizar schema com o banco
+# Sincronizar schema com o banco (adiciona/atualiza tabelas)
 pnpm db:push
-
-# 3. Inicializar com usuário admin
-pnpm zerar-banco
 ```
 
 ## 🔐 Credenciais do Administrador Inicial
@@ -135,18 +140,20 @@ pnpm start
 
 ## 📊 Estrutura do Banco de Dados
 
-O sistema utiliza tabelas separadas para diferentes tipos de análise:
+O sistema utiliza as seguintes tabelas:
 
+- **`users`**: Usuários do sistema (admin, analistas)
+- **`clientes`**: Informações dos clientes analisados
 - **`saques`**: Armazena análises de saques
 - **`depositos`**: Armazena análises de depósitos
-- **`clientes`**: Informações dos clientes
-- **`auditorias`**: Registros de auditoria
 - **`fraudes`**: Relatórios de fraude
-- **`users`**: Usuários do sistema
+- **`auditorias`**: Registros de auditoria
 - **`logs_auditoria`**: Logs de auditoria do sistema
 - **`refresh_tokens`**: Tokens de refresh para autenticação
 
 > **Nota:** A tabela `analises` antiga foi removida. Se ainda existir no banco, execute `scripts/drop_analises_table.sql` para removê-la.
+
+> **💡 Dica:** Para criar todas as tabelas do zero, use o script `setup_banco.sql` (veja seção de Configuração do Banco de Dados acima).
 
 ## 🎯 Funcionalidades Principais
 
@@ -170,9 +177,6 @@ O sistema utiliza tabelas separadas para diferentes tipos de análise:
 - **Banco de Dados:** MySQL + Drizzle ORM
 - **Autenticação:** JWT + bcrypt
 
-## 📚 Documentação Adicional
-
-- [Migração para Tabelas Separadas](./MIGRACAO_TABELAS_SEPARADAS.md) - Detalhes sobre a estrutura de banco
 
 ## 🔧 Comandos Úteis do Banco de Dados
 

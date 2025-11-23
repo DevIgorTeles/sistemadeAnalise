@@ -151,19 +151,21 @@ export async function listarAuditorias(filtros: {
 
 /**
  * Busca auditoria por análise específica
+ * CORRIGIDO: Busca a auditoria mais recente do cliente, independente da data da análise
  */
 export async function getAuditoriaPorAnalise(idCliente: string, dataAnalise: string, tipoAnalise?: "SAQUE" | "DEPOSITO") {
   const db = await getDb();
   if (!db) return null;
   
-  // Buscar auditoria que foi registrada para esta análise específica
-  let analiseResult: any[] = [];
+  // Verificar se a análise específica tem auditoria marcada
+  let analiseTemAuditoria = false;
   
   if (tipoAnalise === "SAQUE" || !tipoAnalise) {
     const saquesResult = await db
       .select({
         id: saques.id,
         auditoriaData: saques.auditoriaData,
+        auditoriaUsuario: saques.auditoriaUsuario,
       })
       .from(saques)
       .where(and(
@@ -171,14 +173,18 @@ export async function getAuditoriaPorAnalise(idCliente: string, dataAnalise: str
         eq(saques.dataAnalise, dataAnalise)
       ))
       .limit(1);
-    analiseResult = saquesResult;
+    
+    if (saquesResult.length > 0 && saquesResult[0].auditoriaData && saquesResult[0].auditoriaUsuario) {
+      analiseTemAuditoria = true;
+    }
   }
   
-  if ((tipoAnalise === "DEPOSITO" || !tipoAnalise) && analiseResult.length === 0) {
+  if ((tipoAnalise === "DEPOSITO" || !tipoAnalise) && !analiseTemAuditoria) {
     const depositosResult = await db
       .select({
         id: depositos.id,
         auditoriaData: depositos.auditoriaData,
+        auditoriaUsuario: depositos.auditoriaUsuario,
       })
       .from(depositos)
       .where(and(
@@ -186,14 +192,14 @@ export async function getAuditoriaPorAnalise(idCliente: string, dataAnalise: str
         eq(depositos.dataAnalise, dataAnalise)
       ))
       .limit(1);
-    analiseResult = depositosResult;
+    
+    if (depositosResult.length > 0 && depositosResult[0].auditoriaData && depositosResult[0].auditoriaUsuario) {
+      analiseTemAuditoria = true;
+    }
   }
   
-  if (analiseResult.length === 0 || !analiseResult[0].auditoriaData) {
-    return null;
-  }
-  
-  // Buscar a auditoria mais recente para este cliente
+  // Buscar a auditoria mais recente para este cliente (independente da data)
+  // Se a análise tem auditoria marcada, retornar a auditoria mais recente
   const auditoriaResult = await db
     .select({
       id: auditorias.id,
@@ -209,6 +215,13 @@ export async function getAuditoriaPorAnalise(idCliente: string, dataAnalise: str
     .orderBy(desc(auditorias.criadoEm))
     .limit(1);
   
+  // Retornar auditoria se a análise tem auditoria marcada OU se há auditoria recente do cliente
+  if (analiseTemAuditoria && auditoriaResult.length > 0) {
+    return auditoriaResult[0];
+  }
+  
+  // Se não tem auditoria marcada na análise, mas há auditoria recente do cliente, retornar também
+  // (pode ser que a auditoria foi aplicada em outra análise do mesmo cliente)
   return auditoriaResult.length > 0 ? auditoriaResult[0] : null;
 }
 

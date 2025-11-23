@@ -292,10 +292,17 @@ class SDKServer {
       throw ForbiddenError("User not found");
     }
 
-    await db.upsertUser({
-      openId: user.openId,
-      lastSignedIn: signedInAt,
-    });
+    // Só atualiza lastSignedIn se passou pelo menos 5 minutos desde a última atualização
+    // Isso evita muitas chamadas ao banco em requisições frequentes
+    const lastSignedIn = user.lastSignedIn ? new Date(user.lastSignedIn) : null;
+    const fiveMinutesAgo = new Date(signedInAt.getTime() - 5 * 60 * 1000);
+    
+    if (!lastSignedIn || lastSignedIn < fiveMinutesAgo) {
+      await db.upsertUser({
+        openId: user.openId,
+        lastSignedIn: signedInAt,
+      });
+    }
 
     return user;
   }

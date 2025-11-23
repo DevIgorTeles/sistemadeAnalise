@@ -6,7 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { LoadingState } from "@/components/common/LoadingState";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
-import { formatarData, formatarDataHora } from "@/utils/formatters";
+import { formatarData } from "@/utils/formatters";
 
 export default function Fraudes() {
   const { user, loading } = useAuth({
@@ -73,6 +73,17 @@ export default function Fraudes() {
                         </p>
                       </div>
                     </div>
+
+                    {fraude.nomeCliente && (
+                      <div className="mb-4">
+                        <span className="text-muted-foreground text-sm font-medium block mb-1">
+                          Nome do Cliente:
+                        </span>
+                        <p className="text-foreground font-medium">
+                          {fraude.nomeCliente}
+                        </p>
+                      </div>
+                    )}
 
                     {fraude.descricaoDetalhada && (
                       <div className="mt-4">

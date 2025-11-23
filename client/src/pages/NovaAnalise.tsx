@@ -41,7 +41,8 @@ export default function NovaAnalise() {
   
   // Todos os hooks devem ser chamados antes de qualquer return condicional
   const [tipoAnalise, setTipoAnalise] = useState<TipoAnalise>("SAQUE");
-  const [idCliente, setIdCliente] = useState("");
+  const [idClienteInput, setIdClienteInput] = useState(""); // ID digitado pelo usuário (atualizado a cada caractere)
+  const [idCliente, setIdCliente] = useState(""); // ID validado (usado nas queries, atualizado com debounce)
   const [nomeCompleto, setNomeCompleto] = useState("");
   const [dataCriacaoConta, setDataCriacaoConta] = useState("");
   // Usar data atual no fuso horário de Brasília
@@ -64,6 +65,7 @@ export default function NovaAnalise() {
   const [observacao, setObservacao] = useState("");
   const [isDuplicado, setIsDuplicado] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [analiseJaCriada, setAnaliseJaCriada] = useState(false); // Rastrear se a análise já foi criada nesta sessão
   const [auditoriaMarcada, setAuditoriaMarcada] = useState(false);
   const [auditoriaModalAberto, setAuditoriaModalAberto] = useState(false);
   const [auditoriaTipo, setAuditoriaTipo] = useState<"ESPORTIVO" | "CASSINO" | "">("");
@@ -71,6 +73,7 @@ export default function NovaAnalise() {
   const [auditoriaErro, setAuditoriaErro] = useState("");
   
   // Estados do modal de fraude
+  const [fraudeMarcada, setFraudeMarcada] = useState(false);
   const [fraudeModalAberto, setFraudeModalAberto] = useState(false);
   const [fraudeDescricao, setFraudeDescricao] = useState("");
   const [fraudeErro, setFraudeErro] = useState("");
@@ -78,6 +81,33 @@ export default function NovaAnalise() {
   // Cronômetro automático usando hook customizado
   const timer = useTimer({ autoStart: false });
   const alertaDuplicadoRef = useRef<string | null>(null);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce: atualizar idCliente (usado nas queries) apenas depois que o usuário parar de digitar
+  useEffect(() => {
+    // Limpar timeout anterior se existir
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+
+    // Se o campo foi limpo, atualizar imediatamente
+    if (idClienteInput.length === 0) {
+      setIdCliente("");
+      return;
+    }
+
+    // Aguardar 500ms após o usuário parar de digitar antes de atualizar o ID validado
+    debounceTimeoutRef.current = setTimeout(() => {
+      setIdCliente(idClienteInput.trim());
+    }, 800);
+
+    // Cleanup: limpar timeout se o componente desmontar ou o valor mudar antes do timeout
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, [idClienteInput]);
 
   // Validação de duplicidade: verifica se já existe análise do mesmo tipo na mesma data
   // Revalida automaticamente quando ID, data ou tipo de análise muda
@@ -227,10 +257,11 @@ export default function NovaAnalise() {
     }
   }, [ultimaAnalise, dataCriacaoContaBuscada, idCliente, isDuplicado]);
 
-  // Limpar TODOS os campos quando ID do cliente é removido/apagado
+  // Limpar TODOS os campos quando ID do cliente validado é removido/apagado
   useEffect(() => {
     if (idCliente.length === 0) {
       // Limpar todos os campos do formulário
+      setAnaliseJaCriada(false); // Resetar flag de análise criada
       setNomeCompleto("");
       setDataCriacaoConta("");
       setHorarioSaque("");
@@ -249,6 +280,7 @@ export default function NovaAnalise() {
       setAuditoriaMotivo("");
       setAuditoriaErro("");
       // Limpar campos de fraude
+      setFraudeMarcada(false);
       setFraudeDescricao("");
       setFraudeErro("");
       // Resetar estados
@@ -299,8 +331,9 @@ export default function NovaAnalise() {
   // Todos os hooks (incluindo useMutation) devem estar antes do return condicional
   const criarMutation = trpc.analises.criar.useMutation({
     onError: (error) => {
-      if (error.message.includes("duplicado") || error.message.includes("ja analisado")) {
+      if (error.message.includes("duplicado") || error.message.includes("ja analisado") || error.data?.code === "CONFLICT") {
         setIsDuplicado(true);
+        setAnaliseJaCriada(true); // Marcar que a análise já existe
         toast.error("Este usuário já foi analisado na data de hoje.", {
           duration: 5000,
         });
@@ -318,6 +351,7 @@ export default function NovaAnalise() {
         duration: 3000
       });
       // Limpar campos do formulário e manter usuário na mesma tela para nova análise
+      setIdClienteInput("");
       setIdCliente("");
       limparCamposFormulario();
       setDataAnalise(getDataHojeBrasilia());
@@ -337,16 +371,8 @@ export default function NovaAnalise() {
 
   const reportarFraudeMutation = trpc.fraudes.reportar.useMutation({
     onSuccess: () => {
-      toast.success("✅ Fraude reportada com sucesso! Análise finalizada.", {
-        duration: 5000
-      });
-      // Limpar campos do formulário e manter usuário na mesma tela para nova análise
-      setIdCliente("");
-      limparCamposFormulario();
-      setDataAnalise(getDataHojeBrasilia());
-      setFraudeModalAberto(false);
-      setFraudeDescricao("");
-      setFraudeErro("");
+      // Não limpar campos aqui - isso será feito no handleFinalizar
+      // A mensagem de sucesso será mostrada no handleFinalizar
     },
     onError: (error) => {
       toast.error(`Erro ao reportar fraude: ${error.message || "Erro desconhecido"}`, {
@@ -362,7 +388,8 @@ export default function NovaAnalise() {
   }
 
   const handleFinalizar = async () => {
-    const idClienteTrimmed = idCliente.trim();
+    // Usar idClienteInput para garantir que pegamos o valor digitado, mesmo se o debounce ainda não atualizou
+    const idClienteTrimmed = idClienteInput.trim();
     const nomeTrimmed = nomeCompleto.trim();
     const observacaoTrimmed = observacao.trim();
     const financeiroTrimmed = financeiro.trim();
@@ -398,6 +425,13 @@ export default function NovaAnalise() {
       if (!auditoriaMotivo.trim()) {
         setAuditoriaErro("Informe o motivo da auditoria");
         toast.error("Informe o motivo da auditoria");
+        return;
+      }
+    }
+
+    if (fraudeMarcada) {
+      if (!fraudeDescricao.trim() || fraudeDescricao.trim().length < 10) {
+        toast.error("Informe a descrição detalhada da fraude (mínimo 10 caracteres)");
         return;
       }
     }
@@ -514,10 +548,13 @@ export default function NovaAnalise() {
       
       // Resetar cronômetro após sucesso
       timer.resetar();
+      
+      // Marcar que a análise foi criada
+      setAnaliseJaCriada(true);
 
       if (auditoriaMarcada) {
         await registrarAuditoriaMutation.mutateAsync({
-          idCliente,
+          idCliente: idClienteTrimmed,
           motivo: auditoriaMotivo.trim(),
           tipo: auditoriaTipo as TipoAuditoria,
         });
@@ -528,17 +565,43 @@ export default function NovaAnalise() {
         );
       }
 
+      if (fraudeMarcada) {
+        if (!fraudeDescricao.trim() || fraudeDescricao.trim().length < 10) {
+          toast.error("Descrição detalhada da fraude é obrigatória (mínimo 10 caracteres)");
+          return;
+        }
+        await reportarFraudeMutation.mutateAsync({
+          idCliente: idClienteTrimmed,
+          dataAnalise: dataAnalise,
+          descricaoDetalhada: fraudeDescricao.trim(),
+          motivoPadrao: "FRAUDE_REPORTADA",
+          motivoLivre: undefined,
+        });
+        toast.success(
+          `✅ Fraude reportada para cliente ${idClienteTrimmed}`,
+          { duration: 4000 }
+        );
+      }
+
       await finalizarMutation.mutateAsync({
-        idCliente,
+        idCliente: idClienteTrimmed,
         dataAnalise,
       });
+      
+      // Limpar campos após finalizar com sucesso
+      setIdClienteInput("");
+      setIdCliente("");
+      limparCamposFormulario();
+      setDataAnalise(getDataHojeBrasilia());
+      setFraudeMarcada(false);
+      setFraudeDescricao("");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleReportarFraude = () => {
-    if (!idCliente.trim()) {
+    if (!idClienteInput.trim()) {
       toast.error("Informe o ID do cliente antes de reportar fraude");
       return;
     }
@@ -547,62 +610,30 @@ export default function NovaAnalise() {
     setFraudeModalAberto(true);
   };
 
-  const handleConfirmarFraude = async () => {
-    const idClienteTrimmed = idCliente.trim();
+  const handleToggleFraude = (checked: boolean | "indeterminate") => {
+    if (checked === true) {
+      handleReportarFraude();
+    } else {
+      handleCancelarFraude();
+    }
+  };
+
+  const handleConfirmarFraude = () => {
     const descricaoTrimmed = fraudeDescricao.trim();
-
-    if (!idClienteTrimmed) {
-      setFraudeErro("ID do cliente é obrigatório");
-      return;
-    }
-
-    if (!dataAnalise) {
-      setFraudeErro("Data da análise é obrigatória");
-      return;
-    }
 
     if (!descricaoTrimmed || descricaoTrimmed.length < 10) {
       setFraudeErro("Descrição detalhada é obrigatória (mínimo 10 caracteres)");
       return;
     }
 
-    if (isDuplicado) {
-      toast.error("Este usuário já foi analisado na data de hoje.", {
-        duration: 5000,
-      });
-      return;
-    }
-
-    setIsLoading(true);
+    setFraudeMarcada(true);
     setFraudeErro("");
-
-    try {
-      // Reportar a fraude
-      await reportarFraudeMutation.mutateAsync({
-        idCliente: idClienteTrimmed,
-        dataAnalise: dataAnalise,
-        descricaoDetalhada: descricaoTrimmed,
-        motivoPadrao: "FRAUDE_REPORTADA", // Motivo padrão
-        motivoLivre: undefined,
-      });
-
-      // Finalizar a análise (contar como análise concluída)
-      await finalizarMutation.mutateAsync({
-        idCliente: idClienteTrimmed,
-        dataAnalise: dataAnalise,
-      });
-
-      // Resetar cronômetro após sucesso
-      timer.resetar();
-    } catch (error: any) {
-      console.error("Erro ao reportar fraude:", error);
-      // O erro já é tratado no onError da mutation
-    } finally {
-      setIsLoading(false);
-    }
+    setFraudeModalAberto(false);
+    toast.success("Fraude marcada para esta análise");
   };
 
   const handleCancelarFraude = () => {
+    setFraudeMarcada(false);
     setFraudeModalAberto(false);
     setFraudeDescricao("");
     setFraudeErro("");
@@ -718,14 +749,14 @@ export default function NovaAnalise() {
                   </div>
                   <Input
                     id="idCliente"
-                    value={idCliente}
+                    value={idClienteInput}
                     onChange={(e) => {
-                      setIdCliente(e.target.value);
+                      setIdClienteInput(e.target.value);
                       // Resetar estado de duplicado ao mudar ID para revalidar
                       setIsDuplicado(false);
-                      // Revalidar duplicidade quando ID mudar (se data e tipo estiverem preenchidos)
-                      if (e.target.value && dataAnalise) {
-                        setTimeout(() => refetchVerificacao(), 100);
+                      // Limpar campos quando o ID for apagado
+                      if (e.target.value.length === 0) {
+                        setIdCliente("");
                       }
                     }}
                     placeholder="Digite o ID"
@@ -959,9 +990,10 @@ export default function NovaAnalise() {
               </div>
             </div>
 
-            {/* Auditoria */}
-            <div className="border-t border-border pt-6">
-              <div className="space-y-3 border border-border/50 rounded-lg p-4 bg-background/40">
+            {/* Auditoria e Fraude */}
+            <div className="border-t border-border pt-6 space-y-6">
+              {/* Seção de Auditoria */}
+              <div className="space-y-4 border border-amber-500/20 rounded-lg p-5 bg-amber-500/5">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <Checkbox
@@ -969,25 +1001,26 @@ export default function NovaAnalise() {
                       checked={auditoriaMarcada}
                       onCheckedChange={handleToggleAuditoria}
                       disabled={camposDesabilitados}
+                      className="border-amber-500/50 data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
                     />
                     <div>
-                      <Label htmlFor="auditoriaFlag" className="text-foreground font-medium cursor-pointer">
-                        Auditoria?
+                      <Label htmlFor="auditoriaFlag" className="text-foreground font-semibold cursor-pointer text-base">
+                        Auditoria Detalhada
                       </Label>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground mt-1">
                         Defina motivo e tipo de auditoria antes de finalizar a análise.
                       </p>
                     </div>
                   </div>
                   {auditoriaMarcada && (
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" onClick={abrirModalAuditoria}>
+                      <Button size="sm" variant="outline" onClick={abrirModalAuditoria} className="border-amber-500/30 hover:bg-amber-500/10">
                         Editar
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-destructive hover:text-destructive"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
                         onClick={handleCancelarAuditoria}
                       >
                         Remover
@@ -997,27 +1030,33 @@ export default function NovaAnalise() {
                 </div>
 
                 {auditoriaMarcada && (
-                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm space-y-2">
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm space-y-2 mt-3">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-amber-200 flex items-center gap-2">
-                        ⚠️ Auditoria marcada nesta análise
+                        <Shield size={16} />
+                        Auditoria marcada nesta análise
                       </span>
-                      <span className="text-xs uppercase tracking-wide text-amber-300">{auditoriaTipo}</span>
+                      <span className="text-xs uppercase tracking-wide text-amber-300 font-semibold px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30">
+                        {auditoriaTipo}
+                      </span>
                     </div>
-                    <p className="text-foreground/90 whitespace-pre-line">{auditoriaMotivo}</p>
+                    <p className="text-foreground/90 whitespace-pre-line mt-2">{auditoriaMotivo}</p>
                   </div>
                 )}
 
                 {!auditoriaMarcada && ultimaAuditoria && (
-                  <div className="rounded-md border border-primary/30 bg-primary/5 p-4 text-sm space-y-1">
+                  <div className="rounded-md border border-primary/30 bg-primary/5 p-4 text-sm space-y-1 mt-3">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-primary flex items-center gap-2">
-                        ⚠️ Auditoria existente para este cliente
+                        <Shield size={16} />
+                        Auditoria existente para este cliente
                       </span>
-                      <span className="text-xs uppercase tracking-wide text-primary">{ultimaAuditoria.tipo}</span>
+                      <span className="text-xs uppercase tracking-wide text-primary font-semibold px-2 py-1 rounded bg-primary/20 border border-primary/30">
+                        {ultimaAuditoria.tipo}
+                      </span>
                     </div>
-                    <p className="text-foreground/90">{ultimaAuditoria.motivo}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-foreground/90 mt-2">{ultimaAuditoria.motivo}</p>
+                    <p className="text-xs text-muted-foreground mt-2">
                       Registrada em{" "}
                       {ultimaAuditoria.criadoEm
                         ? formatarDataHora(ultimaAuditoria.criadoEm)
@@ -1027,13 +1066,63 @@ export default function NovaAnalise() {
                   </div>
                 )}
               </div>
+
+              {/* Seção de Fraude */}
+              <div className="space-y-4 border border-red-500/20 rounded-lg p-5 bg-red-500/5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="fraudeFlag"
+                      checked={fraudeMarcada}
+                      onCheckedChange={handleToggleFraude}
+                      disabled={camposDesabilitados}
+                      className="border-red-500/50 data-[state=checked]:bg-red-500 data-[state=checked]:border-red-500"
+                    />
+                    <div>
+                      <Label htmlFor="fraudeFlag" className="text-foreground font-semibold cursor-pointer text-base">
+                        Reportar como Fraude
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Marque esta opção se identificar suspeita de fraude nesta análise.
+                      </p>
+                    </div>
+                  </div>
+                  {fraudeMarcada && (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={handleReportarFraude} className="border-red-500/30 hover:bg-red-500/10">
+                        Editar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleCancelarFraude}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        Remover
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {fraudeMarcada && (
+                  <div className="rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm space-y-2 mt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-red-200 flex items-center gap-2">
+                        <AlertCircle size={16} />
+                        Fraude marcada nesta análise
+                      </span>
+                    </div>
+                    <p className="text-foreground/90 whitespace-pre-line mt-2">{fraudeDescricao}</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Ações */}
             <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border">
               <Button
                 onClick={handleFinalizar}
-                disabled={isDuplicado || isLoading || !idCliente}
+                disabled={isDuplicado || isLoading || !idClienteInput.trim()}
                 className="flex-1 btn-primary"
                 size="lg"
               >
@@ -1048,16 +1137,6 @@ export default function NovaAnalise() {
                     Finalizar Análise (Aprovado)
                   </>
                 )}
-              </Button>
-              <Button
-                onClick={handleReportarFraude}
-                disabled={isDuplicado || !idCliente}
-                variant="destructive"
-                size="lg"
-                className="flex-1"
-              >
-                <AlertCircle className="mr-2 text-white" size={16} />
-                Reportar Fraude
               </Button>
             </div>
           </div>
@@ -1163,7 +1242,7 @@ export default function NovaAnalise() {
               Reportar Fraude
             </DialogTitle>
             <DialogDescription>
-              Preencha os dados abaixo para reportar uma suspeita de fraude. Esta ação finalizará a análise automaticamente.
+              Preencha os dados abaixo para marcar esta análise como fraude. A fraude será registrada quando você finalizar a análise.
             </DialogDescription>
           </DialogHeader>
 
@@ -1208,39 +1287,23 @@ export default function NovaAnalise() {
                 {fraudeErro}
               </div>
             )}
-
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-              <p className="text-foreground/90">
-                <strong>⚠️ Atenção:</strong> Ao reportar esta fraude, a análise será automaticamente finalizada e contabilizada como concluída.
-              </p>
-            </div>
           </div>
 
           <DialogFooter>
             <Button 
               variant="outline" 
               onClick={handleCancelarFraude}
-              disabled={isLoading}
             >
               Cancelar
             </Button>
             <Button 
               onClick={handleConfirmarFraude} 
               variant="destructive"
-              disabled={isLoading || !fraudeDescricao.trim() || fraudeDescricao.trim().length < 10}
+              disabled={!fraudeDescricao.trim() || fraudeDescricao.trim().length < 10}
               className="bg-destructive hover:bg-destructive/90"
             >
-              {isLoading ? (
-                <>
-                  <Loader2 className="animate-spin mr-2" size={16} />
-                  Reportando...
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="mr-2" size={16} />
-                  Reportar Fraude e Finalizar
-                </>
-              )}
+              <AlertCircle className="mr-2" size={16} />
+              Confirmar fraude
             </Button>
           </DialogFooter>
         </DialogContent>
